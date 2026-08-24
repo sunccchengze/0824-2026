@@ -9,6 +9,7 @@ import CableNetwork from './scene/CableNetwork'
 import Substation from './scene/Substation'
 import Callouts from './scene/Callouts'
 import Effects from './scene/Effects'
+import EnvSetup from './scene/EnvSetup'
 import Hud from './hud/Hud'
 import { CAM } from './scene/terrainUtil'
 
@@ -25,6 +26,10 @@ export default function App() {
         <hemisphereLight args={['#1a4a63', '#020509', 0.85]} />
         <directionalLight position={[700, 900, -500]} intensity={0.55} color="#a8d9ff" />
         <directionalLight position={[-600, 500, 900]} intensity={0.22} color="#3f88b8" />
+        {/* 极地月光主光：打亮真实机身白漆 */}
+        <directionalLight position={[-750, 1250, -650]} intensity={1.6} color="#d6e6ff" />
+        <directionalLight position={[500, 420, 1150]} intensity={0.45} color="#86b8dc" />
+        <EnvSetup />
         <SkyAurora />
         <WorldTerrain />
         <SparkleGround />
