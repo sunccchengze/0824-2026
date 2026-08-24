@@ -33,21 +33,21 @@ void main() {
   vec3 d = normalize(vDir);
   float h = clamp(d.y, -0.08, 1.0);
 
-  // 夜空纵向渐变：近黑蓝 → 深靛
-  vec3 col = mix(vec3(0.016, 0.05, 0.09), vec3(0.006, 0.016, 0.035), smoothstep(0.0, 0.55, h));
+  // 夜空纵向渐变：近黑蓝 → 深靛（压暗，给极光留舞台）
+  vec3 col = mix(vec3(0.010, 0.032, 0.062), vec3(0.004, 0.012, 0.028), smoothstep(0.0, 0.55, h));
 
-  // 地平附近青调雾辉
-  col += vec3(0.03, 0.11, 0.14) * pow(1.0 - abs(h), 6.0) * 1.25;
+  // 地平附近青调雾辉（克制）
+  col += vec3(0.02, 0.08, 0.10) * pow(1.0 - abs(h), 6.0) * 0.9;
 
-  // 极光带：贴地平、随方位起伏、时变漂移（右上象限偏亮）
+  // 极光带：贴地平一线薄纱、时变漂移（右上象限偏亮）
   float az = atan(d.z, d.x); // -PI..PI
-  float band = smoothstep(0.16, 0.02, abs(h - 0.075 - 0.045 * sin(az * 1.6)));
+  float band = smoothstep(0.085, 0.012, abs(h - 0.055 - 0.03 * sin(az * 1.6)));
   float drift = fbm(vec2(az * 2.2 + uTime * 0.02, h * 9.0 - uTime * 0.05));
   float rays = fbm(vec2(az * 9.0, h * 26.0 - uTime * 0.028));
-  float aur = band * smoothstep(0.32, 0.75, drift) * (0.45 + 0.55 * rays);
-  float azBoost = 0.55 + 0.45 * smoothstep(-0.4, 0.9, -cos(az - 0.65));
+  float aur = band * smoothstep(0.34, 0.78, drift) * (0.4 + 0.6 * rays);
+  float azBoost = 0.35 + 0.65 * smoothstep(-0.4, 0.9, -cos(az - 0.65));
   vec3 auroraCol = mix(vec3(0.10, 0.85, 0.62), vec3(0.24, 0.72, 1.0), clamp(h * 6.0, 0.0, 1.0));
-  col += auroraCol * aur * 0.9 * azBoost;
+  col += auroraCol * aur * 0.6 * azBoost;
 
   // 星场（稀疏、轻微闪烁）
   vec2 sp = d.xz / max(0.18, d.y + 0.25);

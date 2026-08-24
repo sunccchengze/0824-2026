@@ -1,4 +1,14 @@
 /* ===== 冰青设计令牌（docs/04 钦定） ===== */
+@font-face {
+  font-family: 'Barlow Condensed';
+  src: url('/fonts/barlow-condensed-latin-500-normal.woff2') format('woff2');
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Barlow Condensed';
+  src: url('/fonts/barlow-condensed-latin-600-normal.woff2') format('woff2');
+  font-weight: 600; font-style: normal; font-display: swap;
+}
 :root {
   --bg-deep: #03080f;
   --bg-sea: #071520;
@@ -33,14 +43,15 @@ html, body, #root { height: 100%; margin: 0; background: var(--bg-deep); font-fa
   backdrop-filter: blur(10px);
   clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
   padding: 10px 12px 12px;
+  overflow: hidden;
   animation: panel-in 0.5s ease both;
 }
 @keyframes panel-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .panel::before { content: ''; position: absolute; top: 0; left: 8%; right: 55%; height: 1px; background: linear-gradient(90deg, rgba(169, 236, 255, 0.8), transparent); }
-.panel-title { display: flex; align-items: center; gap: 6px; font-size: 12px; letter-spacing: 0.14em; color: var(--ice); opacity: 0.92; }
+.panel-title { display: flex; align-items: center; gap: 6px; font-size: 12px; letter-spacing: 0.14em; color: var(--ice); opacity: 0.92; white-space: nowrap; }
 .panel-title i.diamond { width: 5px; height: 5px; background: var(--cyan); transform: rotate(45deg); box-shadow: 0 0 6px var(--cyan); flex: none; }
-.panel-title .en { margin-left: auto; font-size: 9px; letter-spacing: 0.08em; color: var(--dim); text-transform: uppercase; }
-.tag { display: inline-block; font-size: 9px; line-height: 1; padding: 2px 5px; border: 1px solid rgba(61, 90, 116, 0.9); color: var(--cyan); opacity: 0.85; letter-spacing: 0.1em; margin-left: 6px; vertical-align: 1px; }
+.panel-title .en { margin-left: auto; font-size: 8px; letter-spacing: 0.06em; color: var(--dim); text-transform: uppercase; }
+.tag { display: inline-block; font-size: 8px; line-height: 1; padding: 1.5px 4px; border: 1px solid rgba(61, 90, 116, 0.9); color: var(--cyan); opacity: 0.85; letter-spacing: 0.06em; margin-left: 4px; vertical-align: 1px; white-space: nowrap; }
 
 /* 顶部通栏 */
 .topbar { position: absolute; top: 0; left: 0; right: 0; height: 52px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
