@@ -3,11 +3,14 @@ import { OrbitControls } from '@react-three/drei'
 import SkyAurora from './scene/SkyAurora'
 import WorldTerrain from './scene/WorldTerrain'
 import SparkleGround from './scene/SparkleGround'
+import WindVeil from './scene/WindVeil'
 import TurbineField from './scene/TurbineField'
 import CableNetwork from './scene/CableNetwork'
 import Substation from './scene/Substation'
+import Callouts from './scene/Callouts'
 import Effects from './scene/Effects'
 import Hud from './hud/Hud'
+import { CAM } from './scene/terrainUtil'
 
 export default function App() {
   return (
@@ -15,28 +18,29 @@ export default function App() {
       <Canvas
         gl={{ antialias: false, powerPreference: 'high-performance' }}
         dpr={[1, 2]}
-        camera={{ position: [480, 780, 920], fov: 40, near: 1, far: 9000 }}
+        camera={{ position: CAM.pos, fov: CAM.fov, near: 1, far: 16000 }}
       >
-        <color attach="background" args={['#03080f']} />
-        <fog attach="fog" args={['#081527', 1600, 5600]} />
-        <hemisphereLight args={['#0e2b3f', '#010204', 0.55]} />
-        <directionalLight position={[500, 700, -400]} intensity={0.5} color="#9fd8ff" />
+        <color attach="background" args={['#02070d']} />
+        <fog attach="fog" args={['#0a1a28', 2400, 8200]} />
+        <hemisphereLight args={['#1a4a63', '#020509', 0.85]} />
+        <directionalLight position={[700, 900, -500]} intensity={0.55} color="#a8d9ff" />
+        <directionalLight position={[-600, 500, 900]} intensity={0.22} color="#3f88b8" />
         <SkyAurora />
         <WorldTerrain />
         <SparkleGround />
+        <WindVeil />
         <CableNetwork />
         <Substation />
         <TurbineField />
+        <Callouts />
         <OrbitControls
           makeDefault
-          target={[40, 20, 60]}
-          maxPolarAngle={Math.PI / 2.12}
-          minDistance={220}
-          maxDistance={3200}
+          target={CAM.target}
+          maxPolarAngle={Math.PI / 2.06}
+          minDistance={260}
+          maxDistance={4200}
           enableDamping
           dampingFactor={0.06}
-          autoRotate
-          autoRotateSpeed={0.12}
         />
         <Effects />
       </Canvas>

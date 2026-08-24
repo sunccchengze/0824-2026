@@ -1,41 +1,86 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
-import { Grid } from '@react-three/drei'
 import { terrainHeight } from './terrainUtil'
 
-// W4 辽阔暗色地形 + 左侧海岸下潜（W5）；高度场与 terrainUtil 同源
+const GRID_VERT = /* glsl */ `
+varying vec2 vUvW;
+varying float vY;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vUvW = wp.xz;
+  vY = wp.y;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`
+// 程序化测量网格：贴地投影、随距离淡出
+const GRID_FRAG = /* glsl */ `
+precision highp float;
+varying vec2 vUvW;
+varying float vY;
+uniform vec3 uColor;
+uniform float uCell;
+uniform float uSect;
+float gridLine(vec2 p, float w) {
+  vec2 g = abs(fract(p - 0.5) - 0.5) / fwidth(p);
+  float line = 1.0 - min(min(g.x, g.y), 1.0);
+  return smoothstep(0.0, w, line);
+}
+void main() {
+  float minor = gridLine(vUvW / uCell, 0.9);
+  float major = gridLine(vUvW / uSect, 0.9);
+  float cam = clamp(1.0 - length(vUvW) / 2600.0, 0.0, 1.0);
+  float a = (minor * 0.16 + major * 0.38) * cam;
+  gl_FragColor = vec4(uColor, a);
+}
+`
+
+// W4 辽阔地形：丘谷顶点色 + 贴地投影网格（基准图暗场 + 青绿测量网）
 export default function WorldTerrain() {
-  const geo = useMemo(() => {
-    const g = new THREE.PlaneGeometry(4600, 4600, 150, 150)
+  const { geo, gridGeo, gridMat } = useMemo(() => {
+    const g = new THREE.PlaneGeometry(5600, 5600, 200, 200)
     g.rotateX(-Math.PI / 2)
     const pos = g.attributes.position
-    for (let i = 0; i < pos.count; i++) pos.setY(i, terrainHeight(pos.getX(i), pos.getZ(i)))
+    const colors = new Float32Array(pos.count * 3)
+    const cLow = new THREE.Color('#081420')
+    const cMid = new THREE.Color('#123043')
+    const cHigh = new THREE.Color('#1e4a63')
+    const tmp = new THREE.Color()
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i)
+      const y = terrainHeight(x, z)
+      pos.setY(i, y)
+      const t = THREE.MathUtils.smoothstep(y, -30, 110)
+      tmp.lerpColors(cLow, cMid, Math.min(1, t * 1.6))
+      if (t > 0.62) tmp.lerp(cHigh, (t - 0.62) * 1.4)
+      colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     g.computeVertexNormals()
-    return g
+
+    // 贴地网格片（仅覆盖场区谷地，边缘淡出）
+    const gg = new THREE.PlaneGeometry(3400, 3000, 120, 106)
+    gg.rotateX(-Math.PI / 2)
+    gg.translate(150, 0, -60)
+    const gp = gg.attributes.position
+    for (let i = 0; i < gp.count; i++) gp.setY(i, terrainHeight(gp.getX(i), gp.getZ(i)) + 0.65)
+    const gm = new THREE.ShaderMaterial({
+      vertexShader: GRID_VERT, fragmentShader: GRID_FRAG,
+      uniforms: {
+        uColor: { value: new THREE.Color('#2f7ba0') },
+        uCell: { value: 120 }, uSect: { value: 600 },
+      },
+      transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+    return { geo: g, gridGeo: gg, gridMat: gm }
   }, [])
 
   return (
     <group>
-      <mesh geometry={geo} receiveShadow>
-        <meshStandardMaterial color="#040d16" roughness={0.95} metalness={0.05} />
+      <mesh geometry={geo}>
+        <meshStandardMaterial vertexColors roughness={1} metalness={0} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.6, 0]}>
-        <planeGeometry args={[4800, 4800]} />
-        <meshStandardMaterial color="#06202f" roughness={0.34} metalness={0.68} />
-      </mesh>
-      <Grid
-        position={[0, 0.5, 0]}
-        args={[4600, 4600]}
-        cellSize={60}
-        cellColor="#0b2c40"
-        cellThickness={0.5}
-        sectionSize={300}
-        sectionColor="#134e6b"
-        sectionThickness={0.85}
-        fadeDistance={2100}
-        fadeStrength={2.4}
-        infiniteGrid
-      />
+      <mesh geometry={gridGeo} material={gridMat} renderOrder={1} />
     </group>
   )
 }
