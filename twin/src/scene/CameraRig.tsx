@@ -12,9 +12,10 @@ const OVERVIEW_TARGET = new THREE.Vector3(...CAM.target)
 
 // 近排左侧机组 T07 前方的近景终点：让真实翼型和线框占据画面，
 // 同时保留后排机组、集电线和 HUD 的数字孪生叙事。
+// 相机高度低于轮毂观察点，最后形成轻微仰视，而不是从塔顶向下俯看。
 const CLOSE_UNIT = FARM[6]
-const CLOSE = new THREE.Vector3(CLOSE_UNIT.x + 70, 132, CLOSE_UNIT.z + 145)
-const CLOSE_TARGET = new THREE.Vector3(CLOSE_UNIT.x, 38, CLOSE_UNIT.z)
+const CLOSE = new THREE.Vector3(CLOSE_UNIT.x + 76, 56, CLOSE_UNIT.z + 168)
+const CLOSE_TARGET = new THREE.Vector3(CLOSE_UNIT.x, 92, CLOSE_UNIT.z)
 const TARGET_FROM = new THREE.Vector3(-200, 0, -500)
 
 const START = 1.2
