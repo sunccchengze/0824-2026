@@ -3,26 +3,26 @@ import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { CAM, FARM } from './terrainUtil'
 
-// 开场巡航：先完成原图的大场景构图，再继续推近到中排中机组，
-// 直到真实翼型、机舱和线框结构在画面中清晰可见（总计约 28s）。
-// 之后回到自由轨道（OrbitControls）。
+// 开场巡航使用一条连续的 Catmull-Rom 镜头轨迹：
+// 远高空 → 全场构图节点 → 低机位近景。全景节点只是经过，不在中间刹停，
+// 因此镜头方向、速度和景别会连续过渡，最后自然落到轻微仰视的风机特写。
 const FROM = new THREE.Vector3(1500, 1150, 2600)
 const OVERVIEW = new THREE.Vector3(...CAM.pos)
 const OVERVIEW_TARGET = new THREE.Vector3(...CAM.target)
 
-// 近排左侧机组 T07 前方的近景终点：让真实翼型和线框占据画面，
-// 同时保留后排机组、集电线和 HUD 的数字孪生叙事。
+// 近排左侧机组 T07 前方的近景终点：
 // 相机高度低于轮毂观察点，最后形成轻微仰视，而不是从塔顶向下俯看。
 const CLOSE_UNIT = FARM[6]
 const CLOSE = new THREE.Vector3(CLOSE_UNIT.x + 76, 56, CLOSE_UNIT.z + 168)
 const CLOSE_TARGET = new THREE.Vector3(CLOSE_UNIT.x, 92, CLOSE_UNIT.z)
 const TARGET_FROM = new THREE.Vector3(-200, 0, -500)
 
+const CAMERA_PATH = new THREE.CatmullRomCurve3([FROM, OVERVIEW, CLOSE], false, 'centripetal', 0.5)
+const LOOK_PATH = new THREE.CatmullRomCurve3([TARGET_FROM, OVERVIEW_TARGET, CLOSE_TARGET], false, 'centripetal', 0.5)
 const START = 1.2
-const OVERVIEW_END = 12
-const CLOSE_END = 28
+const INTRO_END = 28
 
-// 简易 smoothstep 缓动
+// 简易 smoothstep 缓动（只包住整条轨迹，绝不在中间节点重新计时）
 const ease = (t: number) => t * t * (3 - 2 * t)
 
 export default function CameraRig() {
@@ -36,7 +36,7 @@ export default function CameraRig() {
     if (finished.current) return
 
     const t0 = state.clock.elapsedTime
-    if (t0 > CLOSE_END) {
+    if (t0 > INTRO_END) {
       finished.current = true
       return
     }
@@ -48,18 +48,10 @@ export default function CameraRig() {
       controlsRef.current = ctl
     }
 
-    let p: THREE.Vector3
-    let tg: THREE.Vector3
-    if (t0 <= OVERVIEW_END) {
-      const t = ease(Math.min(1, (t0 - START) / (OVERVIEW_END - START)))
-      p = FROM.clone().lerp(OVERVIEW, t)
-      tg = TARGET_FROM.clone().lerp(OVERVIEW_TARGET, t)
-    } else {
-      // 第二段不跳切：从全场官方机位继续滑轨推进到近景机组。
-      const t = ease(Math.min(1, (t0 - OVERVIEW_END) / (CLOSE_END - OVERVIEW_END)))
-      p = OVERVIEW.clone().lerp(CLOSE, t)
-      tg = OVERVIEW_TARGET.clone().lerp(CLOSE_TARGET, t)
-    }
+    const progress = ease(Math.min(1, (t0 - START) / (INTRO_END - START)))
+    // getPointAt 按弧长取样，且穿过 OVERVIEW 节点时保持连续切线，避免“两段式”停顿。
+    const p = CAMERA_PATH.getPointAt(progress)
+    const tg = LOOK_PATH.getPointAt(progress)
 
     camera.position.copy(p)
     camera.lookAt(tg)
