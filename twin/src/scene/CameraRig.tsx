@@ -40,12 +40,17 @@ const CAMERA_NODES = [
   new THREE.Vector3(ONE.x + 76, 56, ONE.z + 168), // 1 号前低机位终点
 ]
 
+// 正下方观察存在 lookAt 的极点奇异：相机一旦完全垂直向下，
+// 世界 up 轴没有唯一的屏幕朝向，下一帧就可能突然翻转 180°。
+// 这里让俯冲视线保留极小的前向量（约 7°，肉眼仍是正上空俯瞰），
+// 再用多个节点把视线连续抬起，彻底消除这个突变源。
+const DIVE_TARGET = new THREE.Vector3(-100, 0, -690)
 const LOOK_NODES = [
-  new THREE.Vector3(-100, 0, -640), // 正上空向下看阵列中心
-  new THREE.Vector3(-100, 0, -640), // 俯冲保持垂直视线
-  new THREE.Vector3(-100, 0, -640),
-  new THREE.Vector3(-100, 15, -640), // 先只抬一点，衔接后退
-  new THREE.Vector3(-100, 70, -640), // 连续抬头
+  DIVE_TARGET.clone(), // 正上空向下看阵列中心
+  DIVE_TARGET.clone(), // 俯冲保持近似垂直视线
+  DIVE_TARGET.clone(),
+  new THREE.Vector3(-100, 15, -670), // 先只抬一点，衔接后退
+  new THREE.Vector3(-100, 70, -650), // 连续抬头
   new THREE.Vector3(-100, 110, -640), // 进入远景视线
   new THREE.Vector3(-100, 120, -640), // 全景看向场区
   new THREE.Vector3(-100, 120, -640),
