@@ -1,51 +1,9 @@
 import { useMemo } from 'react'
-import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { terrainHeight } from './terrainUtil'
 
-const GRID_VERT = /* glsl */ `
-varying vec2 vUvW;
-void main() {
-  vec4 wp = modelMatrix * vec4(position, 1.0);
-  vUvW = wp.xz;
-  gl_Position = projectionMatrix * viewMatrix * wp;
-}
-`
-
-// 无限感科技网格：细网格、主网格和沿网格移动的数据流脉冲。
-const GRID_FRAG = /* glsl */ `
-precision highp float;
-varying vec2 vUvW;
-uniform vec3 uColor;
-uniform float uCell;
-uniform float uSect;
-uniform float uTime;
-
-float gridLine(vec2 p, float w) {
-  vec2 g = abs(fract(p - 0.5) - 0.5) / fwidth(p);
-  float line = 1.0 - min(min(g.x, g.y), 1.0);
-  return smoothstep(0.0, w, line);
-}
-
-void main() {
-  float minor = gridLine(vUvW / uCell, 0.9);
-  float major = gridLine(vUvW / uSect, 0.9);
-  float line = max(minor, major);
-  float fade = clamp(1.0 - length(vUvW) / 4300.0, 0.0, 1.0);
-
-  // 两组沿 X/Z 方向奔跑的窄脉冲，表现数据在地面网格上传输。
-  float pulseX = pow(max(0.0, sin(vUvW.x * 0.011 - uTime * 2.0)), 28.0);
-  float pulseZ = pow(max(0.0, sin(vUvW.y * 0.014 - uTime * 1.55)), 28.0);
-  float flow = max(pulseX, pulseZ) * line;
-
-  vec3 flowColor = mix(uColor, vec3(0.04, 0.72, 0.86), flow);
-  float alpha = (minor * 0.065 + major * 0.18 + flow * 0.30) * fade;
-  gl_FragColor = vec4(flowColor, alpha);
-}
-`
-
-// 非图片的微表面层：用多尺度程序噪声提供细腻岩面颗粒、裂隙和微弱湿润变化。
-// 它不是泥土图片贴图，主体仍是 #040911 的暗色半透明科技地面。
+// 朴素的地形表面：不再使用科技网格，也不使用泥土图片。
+// 地面只保留墨青色磨砂材质、细腻程序微表面和极弱的静态等高线质感。
 const DETAIL_VERT = /* glsl */ `
 varying vec3 vWorld;
 varying vec3 vN;
@@ -87,19 +45,24 @@ void main() {
   float distanceFade = clamp(1.0 - length(p) / 3900.0, 0.0, 1.0);
   float grazing = 1.0 - max(dot(normalize(vN), vec3(0.0, 1.0, 0.0)), 0.0);
 
+  // 很淡的静态等高线：沿真实 terrainHeight 生成，不是科技网格，不会移动。
+  float contour = 1.0 - smoothstep(0.0, 0.16, abs(fract(vWorld.y / 28.0) - 0.5));
+  contour *= smoothstep(0.02, 0.16, grazing);
+
   vec3 dark = vec3(0.006, 0.016, 0.023);
   vec3 coolRock = vec3(0.018, 0.065, 0.078);
   vec3 color = mix(dark, coolRock, macro * 0.72 + fine * 0.18);
   color += vec3(0.015, 0.055, 0.070) * crack * 0.35;
   color += vec3(0.008, 0.028, 0.038) * micro * 0.28;
-  float alpha = (0.12 + macro * 0.12 + grazing * 0.05) * distanceFade;
+  color += vec3(0.012, 0.042, 0.050) * contour * 0.22;
+  float alpha = (0.12 + macro * 0.12 + grazing * 0.05 + contour * 0.045) * distanceFade;
   gl_FragColor = vec4(color, alpha);
 }
 `
 
 // W4/W5 真实地形表面：起伏由 terrainHeight 负责，表面由暗色 PBR + 程序微表面负责。
 export default function WorldTerrain() {
-  const { geo, detailGeo, gridGeo, detailMat, gridMat } = useMemo(() => {
+  const { geo, detailGeo, detailMat } = useMemo(() => {
     const g = new THREE.PlaneGeometry(7600, 7600, 220, 220)
     g.rotateX(-Math.PI / 2)
     const pos = g.attributes.position
@@ -120,35 +83,11 @@ export default function WorldTerrain() {
       depthWrite: false,
       depthTest: true,
       blending: THREE.NormalBlending,
-      fog: true,
+      fog: false,
     })
 
-    // 覆盖全场的科技地面网格，而不是只在中间铺一小块。
-    const gg = new THREE.PlaneGeometry(7600, 7600, 180, 180)
-    gg.rotateX(-Math.PI / 2)
-    const gp = gg.attributes.position
-    for (let i = 0; i < gp.count; i++) gp.setY(i, terrainHeight(gp.getX(i), gp.getZ(i)) + 0.70)
-    const gm = new THREE.ShaderMaterial({
-      vertexShader: GRID_VERT,
-      fragmentShader: GRID_FRAG,
-      uniforms: {
-        uColor: { value: new THREE.Color('#00a8c5') },
-        uCell: { value: 96 },
-        uSect: { value: 480 },
-        uTime: { value: 0 },
-      },
-      transparent: true,
-      depthWrite: false,
-      depthTest: true,
-      blending: THREE.AdditiveBlending,
-      fog: true,
-    })
-    return { geo: g, detailGeo: dg, gridGeo: gg, detailMat: dm, gridMat: gm }
+    return { geo: g, detailGeo: dg, detailMat: dm }
   }, [])
-
-  useFrame((state) => {
-    gridMat.uniforms.uTime.value = state.clock.elapsedTime
-  })
 
   return (
     <group>
@@ -156,14 +95,13 @@ export default function WorldTerrain() {
         <meshStandardMaterial
           color="#040911"
           transparent
-          opacity={0.92}
+          opacity={0.94}
           roughness={0.98}
           metalness={0.02}
           envMapIntensity={0.10}
         />
       </mesh>
       <mesh geometry={detailGeo} material={detailMat} renderOrder={0} />
-      <mesh geometry={gridGeo} material={gridMat} renderOrder={1} />
     </group>
   )
 }
