@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
+import { useLoader } from '@react-three/fiber'
 import * as THREE from 'three'
 import { terrainHeight } from './terrainUtil'
 
@@ -34,9 +35,36 @@ void main() {
 }
 `
 
-// W4 辽阔地形：丘谷顶点色 + 贴地投影网格（基准图暗场 + 青绿测量网）
+// W4/W5 真实地形表面：程序化起伏 + 本地高细节岩土/碎石/低矮植被纹理。
+// 纹理只做冷色 PBR 底材，地平线和全息 HUD 的冰青色阶仍由原场景控制。
 export default function WorldTerrain() {
-  const { geo, gridGeo, gridMat } = useMemo(() => {
+  const terrainTexture = useLoader(THREE.TextureLoader, '/terrain-realistic-cyan.png')
+  const { geo, gridGeo, gridMat, terrainMat, bumpMap } = useMemo(() => {
+    const map = terrainTexture
+    map.colorSpace = THREE.SRGBColorSpace
+    map.wrapS = THREE.RepeatWrapping
+    map.wrapT = THREE.RepeatWrapping
+    map.repeat.set(3.4, 3.4)
+    map.anisotropy = 8
+
+    // 同一张高细节灰度起伏作为轻微 bump，补出近景碎石的真实微表面。
+    const bump = map.clone()
+    bump.colorSpace = THREE.NoColorSpace
+    bump.wrapS = THREE.RepeatWrapping
+    bump.wrapT = THREE.RepeatWrapping
+    bump.repeat.copy(map.repeat)
+    bump.needsUpdate = true
+
+    const terrainMaterial = new THREE.MeshStandardMaterial({
+      map,
+      bumpMap: bump,
+      bumpScale: 0.24,
+      color: '#d1e6e7',
+      roughness: 0.94,
+      metalness: 0.015,
+      envMapIntensity: 0.18,
+    })
+
     const g = new THREE.PlaneGeometry(7600, 7600, 220, 220)
     g.rotateX(-Math.PI / 2)
     const pos = g.attributes.position
@@ -72,14 +100,17 @@ export default function WorldTerrain() {
       transparent: true, depthWrite: false,
       blending: THREE.AdditiveBlending,
     })
-    return { geo: g, gridGeo: gg, gridMat: gm }
-  }, [])
+    return { geo: g, gridGeo: gg, gridMat: gm, terrainMat: terrainMaterial, bumpMap: bump }
+  }, [terrainTexture])
+
+  useEffect(() => () => {
+    terrainMat.dispose()
+    bumpMap.dispose()
+  }, [terrainMat, bumpMap])
 
   return (
     <group>
-      <mesh geometry={geo}>
-        <meshStandardMaterial vertexColors roughness={1} metalness={0} />
-      </mesh>
+      <mesh geometry={geo} material={terrainMat} />
       <mesh geometry={gridGeo} material={gridMat} renderOrder={1} />
     </group>
   )
