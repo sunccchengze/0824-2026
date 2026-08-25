@@ -4,65 +4,60 @@ import * as THREE from 'three'
 import { FARM } from './terrainUtil'
 
 // ============================================================================
-// 炫技无人机开场：一条连续的三维航拍轨迹，而不是“远景 → 近景”的直线推镜。
+// 无人机航拍开场（按指定路线设计）
 //
-// 轨迹依次经过：
-// 1. 高空切入整个阵列的正上方俯瞰
-// 2. 向远处侧绕，展示阵列的纵深和电缆网络
-// 3. 从远处快速前推进入风机阵列
-// 4. 在不同机组之间交叉穿梭，并带有轻微机身侧倾
-// 5. 最后降到 T07 前方，以低机位轻微仰视停住
+// 1 → 正上空俯瞰整个阵列
+// 2 → 保持视线向下，竖直俯冲
+// 3 → 镜头上抬并向后倒退，拉到全景
+// 4 → 快速前推到 9 号风机
+// 5 → 在 9 号处转头，对准 1-5-9 对角线
+// 6 → 沿对角线穿过 5 号，飞向 1 号并停住
 //
-// 所有节点属于同一条 Catmull-Rom 曲线：中途不停刹、不跳切；节点之间的
-// 距离差异自然制造快慢结合，再用连续的视线曲线和滚转角强化无人机感。
+// 关键：相机位置、观察目标、视场都只沿一条连续曲线推进。没有两段式
+// smoothstep、没有中间 reset、没有节点硬切，因此速度和视线在每个动作点
+// 都连续衔接。9×3 阵列在世界中对应：789 / 456 / 123。
 // ============================================================================
 
-const FROM = new THREE.Vector3(1500, 1150, 2600)
-const TARGET_FROM = new THREE.Vector3(-200, 0, -500)
+// 阵列编号映射：FARM 的行顺序是远 → 近，所以 FARM[2]=9、FARM[4]=5、FARM[6]=1。
+const ONE = FARM[6]
+const FIVE = FARM[4]
+const NINE = FARM[2]
 
-const CLOSE_UNIT = FARM[6]
-const CLOSE = new THREE.Vector3(CLOSE_UNIT.x + 76, 56, CLOSE_UNIT.z + 168)
-const CLOSE_TARGET = new THREE.Vector3(CLOSE_UNIT.x, 92, CLOSE_UNIT.z)
-
-// 相机节点：大间距段是快速航段，小间距段是穿梭段，形成明显的速度层次。
+// 相机节点：大跨度是快速飞行，小跨度是俯冲缓冲、全景缓行和转头动作。
 const CAMERA_NODES = [
-  FROM,
-  new THREE.Vector3(-110, 1550, -560), // 整个阵列正上方
-  new THREE.Vector3(-110, 1230, -560), // 高空俯瞰缓冲，不急着离开
-  new THREE.Vector3(-1560, 860, -1480), // 绕到西北远处
-  new THREE.Vector3(1740, 760, -930), // 横跨远景，视角大幅扭转
-  new THREE.Vector3(650, 315, -515), // 快速前推，切入风场
-  new THREE.Vector3(300, 170, -255), // 掠过右侧机组
-  new THREE.Vector3(-30, 112, -470), // 穿入中间机组之间
-  new THREE.Vector3(-250, 82, -120), // 横切到近排左侧
-  CLOSE,
+  new THREE.Vector3(-100, 1720, -640), // 正上空起始点
+  new THREE.Vector3(-100, 720, -640), // 竖直俯冲
+  new THREE.Vector3(-100, 300, -640), // 俯冲最低点
+  new THREE.Vector3(-100, 390, 250), // 上抬、向后倒退
+  new THREE.Vector3(60, 480, 990), // 全景构图
+  new THREE.Vector3(120, 470, 900), // 全景缓行，不停顿但放慢
+  new THREE.Vector3(NINE.x + 145, 210, NINE.z - 160), // 快速前推至 9 号
+  new THREE.Vector3(NINE.x + 160, 220, NINE.z - 110), // 9 号处转头
+  new THREE.Vector3(FIVE.x + 100, 130, FIVE.z + 105), // 沿 9→5→1 对角线飞行
+  new THREE.Vector3(ONE.x + 145, 86, ONE.z + 120), // 接近 1 号
+  new THREE.Vector3(ONE.x + 76, 56, ONE.z + 168), // 1 号前低机位终点
 ]
+
 const LOOK_NODES = [
-  TARGET_FROM,
-  new THREE.Vector3(-110, 0, -560),
-  new THREE.Vector3(-110, 70, -560),
-  new THREE.Vector3(-90, 85, -540),
-  new THREE.Vector3(-90, 90, -480),
-  new THREE.Vector3(-80, 92, -440),
-  new THREE.Vector3(330, 90, -184), // 短暂锁定右侧机组
-  new THREE.Vector3(-110, 98, -632), // 视线转向中排机组
-  new THREE.Vector3(-500, 96, -200), // 最后锁定近排左侧机组
-  CLOSE_TARGET,
+  new THREE.Vector3(-100, 0, -640), // 正上空向下看阵列中心
+  new THREE.Vector3(-100, 0, -640), // 俯冲保持垂直视线
+  new THREE.Vector3(-100, 0, -640),
+  new THREE.Vector3(-100, 150, -640), // 镜头上抬
+  new THREE.Vector3(-100, 120, -640), // 全景看向场区
+  new THREE.Vector3(-100, 120, -640),
+  new THREE.Vector3(NINE.x, 96, NINE.z), // 锁定 9 号
+  new THREE.Vector3(FIVE.x, 96, FIVE.z), // 转头朝 9→5→1 对角线
+  new THREE.Vector3(ONE.x, 98, ONE.z), // 穿过 5 号飞向 1 号
+  new THREE.Vector3(ONE.x, 96, ONE.z),
+  new THREE.Vector3(ONE.x, 92, ONE.z), // 低机位轻微仰视
 ]
 
 const CAMERA_PATH = new THREE.CatmullRomCurve3(CAMERA_NODES, false, 'centripetal', 0.38)
 const LOOK_PATH = new THREE.CatmullRomCurve3(LOOK_NODES, false, 'centripetal', 0.38)
-const ROLL_PATH = new THREE.CatmullRomCurve3(
-  [0, 0, 0, 18, -22, 15, -13, 12, -8, 0].map((v) => new THREE.Vector3(v, 0, 0)),
-  false,
-  'centripetal',
-  0.38,
-)
-
-const START = 1.2
+const START = 0
 const INTRO_END = 34
 
-// 整体缓入缓出，但不在中间节点重新 smoothstep，因此不会产生“两段式”停顿。
+// 整体只做一次缓入缓出；中途不重新 ease，避免镜头断裂。
 const ease = (t: number) => t * t * (3 - 2 * t)
 
 export default function CameraRig() {
@@ -71,7 +66,6 @@ export default function CameraRig() {
   const finished = useRef(false)
 
   useFrame((state) => {
-    const el = state.gl.domElement
     if (finished.current) return
 
     const t0 = state.clock.elapsedTime
@@ -79,36 +73,28 @@ export default function CameraRig() {
       finished.current = true
       return
     }
-    if (t0 < START) return
 
     if (!controlsRef.current) {
       controlsRef.current = (state.controls as any) || null
     }
 
-    const progress = ease(Math.min(1, (t0 - START) / (INTRO_END - START)))
-    // 使用 getPoint（而不是 getPointAt）让节点本身成为真实航拍动作点；
-    // Catmull-Rom 会在节点处保持连续切线，避免镜头方向突然折断。
+    const progress = ease(Math.min(1, Math.max(0, (t0 - START) / INTRO_END)))
     const p = CAMERA_PATH.getPoint(progress)
     const tg = LOOK_PATH.getPoint(progress)
-    const roll = THREE.MathUtils.degToRad(ROLL_PATH.getPoint(progress).x)
 
     camera.position.copy(p)
     camera.lookAt(tg)
-    const ctl2 = controlsRef.current
-    if (ctl2) {
-      ctl2.target.copy(tg)
-      ctl2.update()
+    const ctl = controlsRef.current
+    if (ctl) {
+      ctl.target.copy(tg)
+      ctl.update()
     }
 
-    // 重新施加视线和滚转：OrbitControls 更新目标后，保留无人机机身侧倾。
+    // 只保留真实无人机视线，不再人为侧倾，保证动作帅但不花哨。
     camera.lookAt(tg)
-    camera.rotateZ(roll)
-
-    // 高空段使用更宽的航拍视场，进入风机后收窄，增强速度感和主体尺度。
     const perspective = camera as THREE.PerspectiveCamera
-    perspective.fov = THREE.MathUtils.lerp(62, 47, progress)
+    perspective.fov = THREE.MathUtils.lerp(54, 47, progress)
     perspective.updateProjectionMatrix()
-    void el
   })
 
   return null

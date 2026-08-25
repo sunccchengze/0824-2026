@@ -20,7 +20,7 @@ export default function App() {
       <Canvas
         gl={{ antialias: false, powerPreference: 'high-performance' }}
         dpr={[1, 2.5]}
-        camera={{ position: [1500, 1150, 2600], fov: 62, near: 1, far: 18000 }}
+        camera={{ position: [-100, 1720, -640], fov: 54, near: 1, far: 18000 }}
         onCreated={({ gl }) => {
           gl.toneMappingExposure = 1.0
         }}
