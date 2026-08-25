@@ -58,8 +58,8 @@ function makeSurfaceMaterial() {
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
-    blending: THREE.AdditiveBlending,
-    toneMapped: false,
+    blending: THREE.NormalBlending,
+    toneMapped: true,
   })
 }
 
@@ -69,11 +69,11 @@ function makeWireMaterial() {
     transparent: true,
     opacity: 0.15,
     wireframe: true,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
     fog: false,
-    toneMapped: false,
+    toneMapped: true,
   })
 }
 
@@ -82,10 +82,10 @@ function makeEdgeMaterial() {
     color: HOLO_WHITE_HI,
     transparent: true,
     opacity: 0.64,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
     depthWrite: false,
     fog: false,
-    toneMapped: false,
+    toneMapped: true,
   })
 }
 
