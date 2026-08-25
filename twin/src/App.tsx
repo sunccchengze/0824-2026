@@ -10,6 +10,7 @@ import Substation from './scene/Substation'
 import Callouts from './scene/Callouts'
 import Effects from './scene/Effects'
 import EnvSetup from './scene/EnvSetup'
+import CameraRig from './scene/CameraRig'
 import Hud from './hud/Hud'
 import { CAM } from './scene/terrainUtil'
 
@@ -18,32 +19,35 @@ export default function App() {
     <>
       <Canvas
         gl={{ antialias: false, powerPreference: 'high-performance' }}
-        dpr={[1, 2]}
-        camera={{ position: CAM.pos, fov: CAM.fov, near: 1, far: 16000 }}
+        dpr={[1, 2.5]}
+        camera={{ position: CAM.pos, fov: CAM.fov, near: 1, far: 18000 }}
+        onCreated={({ gl }) => {
+          gl.toneMappingExposure = 1.0
+        }}
       >
-        <color attach="background" args={['#02070d']} />
-        <fog attach="fog" args={['#0a1a28', 2400, 8200]} />
-        <hemisphereLight args={['#1a4a63', '#020509', 0.85]} />
-        <directionalLight position={[700, 900, -500]} intensity={0.55} color="#a8d9ff" />
-        <directionalLight position={[-600, 500, 900]} intensity={0.22} color="#3f88b8" />
-        {/* 极地月光主光：打亮真实机身白漆 */}
-        <directionalLight position={[-750, 1250, -650]} intensity={1.6} color="#d6e6ff" />
-        <directionalLight position={[500, 420, 1150]} intensity={0.45} color="#86b8dc" />
+        <color attach="background" args={['#010305']} />
+        <fog attach="fog" args={['#030b14', 2100, 7300]} />
+        <hemisphereLight args={['#123448', '#010408', 0.42]} />
+        <directionalLight position={[700, 900, -500]} intensity={0.32} color="#a8d9ff" />
+        <directionalLight position={[-600, 500, 900]} intensity={0.16} color="#3f88b8" />
+        <directionalLight position={[-750, 1250, -650]} intensity={0.85} color="#d6e6ff" />
+        <directionalLight position={[500, 420, 1150]} intensity={0.26} color="#86b8dc" />
         <EnvSetup />
         <SkyAurora />
         <WorldTerrain />
-        <SparkleGround />
+        <SparkleGround count={4600} />
         <WindVeil />
         <CableNetwork />
         <Substation />
         <TurbineField />
         <Callouts />
+        <CameraRig />
         <OrbitControls
           makeDefault
           target={CAM.target}
           maxPolarAngle={Math.PI / 2.06}
           minDistance={260}
-          maxDistance={4200}
+          maxDistance={4600}
           enableDamping
           dampingFactor={0.06}
         />

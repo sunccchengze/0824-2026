@@ -28,8 +28,8 @@ float gridLine(vec2 p, float w) {
 void main() {
   float minor = gridLine(vUvW / uCell, 0.9);
   float major = gridLine(vUvW / uSect, 0.9);
-  float cam = clamp(1.0 - length(vUvW) / 2600.0, 0.0, 1.0);
-  float a = (minor * 0.16 + major * 0.38) * cam;
+  float cam = clamp(1.0 - length(vUvW) / 2400.0, 0.0, 1.0);
+  float a = (minor * 0.10 + major * 0.26) * cam;
   gl_FragColor = vec4(uColor, a);
 }
 `
@@ -37,13 +37,13 @@ void main() {
 // W4 辽阔地形：丘谷顶点色 + 贴地投影网格（基准图暗场 + 青绿测量网）
 export default function WorldTerrain() {
   const { geo, gridGeo, gridMat } = useMemo(() => {
-    const g = new THREE.PlaneGeometry(5600, 5600, 200, 200)
+    const g = new THREE.PlaneGeometry(7600, 7600, 220, 220)
     g.rotateX(-Math.PI / 2)
     const pos = g.attributes.position
     const colors = new Float32Array(pos.count * 3)
-    const cLow = new THREE.Color('#081420')
-    const cMid = new THREE.Color('#123043')
-    const cHigh = new THREE.Color('#1e4a63')
+    const cLow = new THREE.Color('#02070c')
+    const cMid = new THREE.Color('#05101a')
+    const cHigh = new THREE.Color('#0a1c2c')
     const tmp = new THREE.Color()
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i)
@@ -66,8 +66,8 @@ export default function WorldTerrain() {
     const gm = new THREE.ShaderMaterial({
       vertexShader: GRID_VERT, fragmentShader: GRID_FRAG,
       uniforms: {
-        uColor: { value: new THREE.Color('#2f7ba0') },
-        uCell: { value: 120 }, uSect: { value: 600 },
+        uColor: { value: new THREE.Color('#1d4b68') },
+        uCell: { value: 96 }, uSect: { value: 480 },
       },
       transparent: true, depthWrite: false,
       blending: THREE.AdditiveBlending,

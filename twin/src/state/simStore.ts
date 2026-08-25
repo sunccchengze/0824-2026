@@ -1,33 +1,76 @@
 import { create } from 'zustand'
 
-// 模拟 SCADA 状态（浏览器内代理演示，非 PPO 推理；功率为双线性/抛物代理，显示口径见 docs/03）
-// 钦定真值：3×3 基线 8095.15 kW → 逐排贪心 [30, 20, 0]° → 10041.46 kW（+24.04%）
-export const P_BASE = 8095.15
-export const P_OPT = 10041.46
-export const YAW_OPT: [number, number, number] = [30, 20, 0]
+// ================================================================
+// 模拟 SCADA 状态（浏览器内代理演示）
+// 原图口径：全场功率 479,731 MWh / 扬频率 48.20 Hz / 无功平率功率 19 /
+//          运行电机数 5 / NPI 70·99·92% / 导颈舵机1..5 = -10°
+// 数值仅作大屏演示；真实值口径见 docs/03（FLORIS 3×3 → +24.04%）
+// ================================================================
 
-interface SimState {
-  yawRows: [number, number, number]
-  playing: boolean
-  setYawRow: (i: number, v: number) => void
-  togglePlay: () => void
+export interface AlarmItem {
+  id: number
+  kind: 'red' | 'cyan'
+  zh: string
+  en: string
+  minutes: number
 }
+
+export interface SimState {
+  // 渲染模式：'holo' 全息（原图像素还原）| 'real' NREL 5MW 写实（R3）
+  mode: 'holo' | 'real'
+  setMode: (m: 'holo' | 'real') => void
+
+  // 5 路导颈舵机（原图 yaw=+/-10° 档），对应 turbine/SERVOS 索引
+  servos: number[]
+  setServo: (i: number, v: number) => void
+
+  // 时间轴（24h 巡航）
+  tHours: number
+  playing: boolean
+  togglePlay: () => void
+
+  // 报警流水（分钟前，随时间递增）
+  alarms: AlarmItem[]
+  setAlarms: (a: AlarmItem[]) => void
+  // 矩阵 2×6 状态位
+  matrix: boolean[]
+  setMatrix: (m: boolean[]) => void
+}
+
+const M0: number[] = [-10, -10, -10, -10, -10]
+const ALARM_SEED: AlarmItem[] = [
+  { id: 0, kind: 'red', zh: '过热预警', en: 'Overheat Alarm', minutes: 23 },
+  { id: 1, kind: 'cyan', zh: '过热预警', en: 'Overheat Alarm', minutes: 22 },
+  { id: 2, kind: 'red', zh: '过热预警', en: 'Overheat Alarm', minutes: 22 },
+  { id: 3, kind: 'red', zh: '过热预警', en: 'Overheat Alarm', minutes: 23 },
+  { id: 4, kind: 'cyan', zh: '过热预警', en: 'Overheat Alarm', minutes: 22 },
+]
+
+const MATRIX0: boolean[] = [true, true, false, true, true, false, true, false, true, true, false, true]
+
 export const useSim = create<SimState>((set) => ({
-  yawRows: [...YAW_OPT] as [number, number, number],
-  playing: true,
-  setYawRow: (i, v) =>
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // 深链 ?mode=real 直接进写实模式（R3 NREL 5MW）
+  mode: typeof location !== 'undefined' && new URLSearchParams(location.search).get('mode') === 'real' ? 'real' : 'holo',
+  setMode: (m) => set({ mode: m }),
+
+  servos: [...M0],
+  setServo: (i, v) =>
     set((s) => {
-      const yawRows = [...s.yawRows] as [number, number, number]
-      yawRows[i] = v
-      return { yawRows }
+      const servos = [...s.servos]
+      servos[i] = v
+      return { servos }
     }),
+
+  tHours: 10,
+  playing: true,
   togglePlay: () => set((s) => ({ playing: !s.playing })),
+
+  alarms: [...ALARM_SEED],
+  setAlarms: (a) => set({ alarms: a }),
+  matrix: [...MATRIX0],
+  setMatrix: (m) => set({ matrix: m }),
 }))
 
-// 抛物代理：偏离钦定点按排系数扣减（演示用，标注【模拟】）
-const K: [number, number, number] = [0.31, 0.24, 0.36] // kW / deg²
-export function proxyPower(yaw: [number, number, number]): number {
-  let p = P_OPT
-  for (let i = 0; i < 3; i++) p -= K[i] * (yaw[i] - YAW_OPT[i]) ** 2
-  return Math.max(P_BASE * 0.9, p)
-}
+/** 舵机 → 机组索引映射：5 路对应画面中最显著的 5 台（见 terrainUtil.FARM） */
+export const SERVO_TID = [0, 1, 4, 6, 8] as const

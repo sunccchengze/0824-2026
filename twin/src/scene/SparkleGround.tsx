@@ -25,7 +25,7 @@ varying vec3 vColor;
 void main() {
   float d = length(gl_PointCoord - 0.5);
   float a = smoothstep(0.5, 0.08, d) * vTwinkle;
-  gl_FragColor = vec4(vColor * 1.85, a);
+  gl_FragColor = vec4(vColor * 1.35, a * 0.75);
 }
 `
 

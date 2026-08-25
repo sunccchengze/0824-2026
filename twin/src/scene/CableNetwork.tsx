@@ -3,10 +3,10 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { APPROACH, FARM, SUBSTATION, terrainHeight } from './terrainUtil'
 
-const C_CABLE = new THREE.Color(0.30, 0.98, 1.38)
-const C_RIBBON = new THREE.Color(0.20, 0.72, 1.05)
-const C_PULSE = new THREE.Color(1.05, 1.8, 2.2)
-const C_GLITTER = new THREE.Color(0.75, 1.5, 1.85)
+const C_CABLE = new THREE.Color(0.16, 0.58, 0.86)
+const C_RIBBON = new THREE.Color(0.10, 0.40, 0.62)
+const C_PULSE = new THREE.Color(0.9, 1.7, 2.1)
+const C_GLITTER = new THREE.Color(0.45, 0.95, 1.3)
 
 const GL_VERT = /* glsl */ `
 attribute float aPhase;
@@ -39,11 +39,11 @@ export default function CableNetwork() {
 
   const built = useMemo(() => {
     const group = new THREE.Group()
-    const cableMat = new THREE.MeshBasicMaterial({ color: C_CABLE, transparent: true, opacity: 0.62, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
-    const ribbonMat = new THREE.MeshBasicMaterial({ color: C_RIBBON, transparent: true, opacity: 0.10, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })
-    const beamMat = new THREE.MeshBasicMaterial({ color: C_CABLE, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
-    const pulseMat = new THREE.MeshBasicMaterial({ color: C_PULSE, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
-    const pulseGeo = new THREE.SphereGeometry(1.9, 8, 8)
+    const cableMat = new THREE.MeshBasicMaterial({ color: C_CABLE, transparent: true, opacity: 0.42, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    const ribbonMat = new THREE.MeshBasicMaterial({ color: C_RIBBON, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })
+    const beamMat = new THREE.MeshBasicMaterial({ color: C_CABLE, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    const pulseMat = new THREE.MeshBasicMaterial({ color: C_PULSE, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+    const pulseGeo = new THREE.SphereGeometry(1.45, 8, 8)
 
     const centerCurves: THREE.CatmullRomCurve3[] = []
     const glitterPos: number[] = []
@@ -81,7 +81,7 @@ export default function CableNetwork() {
           const ox = -tan.z * s * 2.3, oz = tan.x * s * 2.3
           sp.push(new THREE.Vector3(c.x + ox, hug(c.x + ox, c.z + oz, 1.25 - Math.abs(s) * 0.1), c.z + oz))
         }
-        const cg = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(sp, false, 'catmullrom', 0.3), 90, 0.62, 6, false)
+        const cg = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(sp, false, 'catmullrom', 0.3), 96, 0.30, 6, false)
         const mesh = new THREE.Mesh(cg, cableMat)
         group.add(mesh)
       }
@@ -137,7 +137,7 @@ export default function CableNetwork() {
       ]
       const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.25)
       beamCurves.push(curve)
-      group.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.78, 6, false), beamMat))
+      group.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.40, 6, false), beamMat))
     }
 
     // ---- 晶粒点云合一 ----

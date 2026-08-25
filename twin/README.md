@@ -1,32 +1,42 @@
-# React + TypeScript + Vite
+# AEOLUS TWIN — 风电场 3A 数字孪生大屏
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+> 用户原图「未来能源数字孪生系统」的像素级还原实现（1920×1080 大屏）。
+> 场景：冰青全息风电场（默认）⇄ NREL 5MW 写实机组（`?mode=real` 或右下角切换）。
 
-Currently, two official plugins are available:
+## 技术栈
+Vite 8 + React 19 + TS + three 0.185 + R3F 9 + drei + @react-three/postprocessing + zustand。
+中文字体内嵌 @fontsource/noto-sans-sc；数字 @fontsource/rajdhani / orbitron / share-tech-mono。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 运行
+```bash
+npm install
+npm run dev        # http://localhost:5173/
+npm run build      # tsc -b && vite build → dist/
+node scripts/shot.mjs <url> <out.png> [waitMs] [w] [h]   # 离屏自拍（沙箱自编译 NSS/NSPR + SwiftShader）
+```
+> 离屏截图依赖 `/tmp/nsslibs`（本沙箱手工编译的 NSS/NSPR）；真机/GPU 无此需求。
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+## 结构
+```
+src/
+  App.tsx                场景装配 + 相机 + 后期链
+  state/simStore.ts      舵机 5 路 / 模式 / 时间轴 / 报警 / 矩阵
+  hud/Hud.tsx            大屏 HUD（1920×1080 等比舞台）
+  styles/theme.css       全套皮肤
+  scene/
+    terrainUtil.ts       世界真值源（地形/机位/升压站/锚点）
+    HoloTurbine.tsx      冰青全息风机（fresnel 发光 + 加色内芯）
+    turbine/geometry.ts  NREL 5MW 参数化写实机（R3）
+    TurbineField.tsx     9 机阵列 + 舵机联动（holo/real 切换）
+    CableNetwork.tsx     三股电缆 + 河床辉光 + 晶粒 + 外送线束
+    Substation.tsx       玻璃升压站
+    SkyAurora/WorldTerrain/SparkleGround/WindVeil/Callouts/CameraRig/Effects
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## 与原图口径差异（演示数据，非 FLORIS 求解）
+| 原图 | 现实现 |
+|---|---|
+| 479,731 MWh / 48.20 Hz / 19 | 按原图逐字复刻（DEMO） |
+| 导颈舵机1-5 = -10° | 5 路滑杆可拖，联动 3D 机组偏航 |
+| NPI 70/99/92% | 复刻原图（真值口径见 docs/03） |
+| 报警 22-23 分钟前 | 演示流水，随播放递增 |

@@ -35,27 +35,31 @@ void main() {
   float az = atan(d.x, -d.z);          // 方位：北=0、东=+π/2（屏幕右）
 
   // 夜空纵向渐变：地平线青霭 → 高天黑蓝
-  vec3 col = mix(vec3(0.055, 0.155, 0.205), vec3(0.010, 0.042, 0.075), smoothstep(0.0, 0.16, h));
-  col = mix(col, vec3(0.003, 0.008, 0.020), smoothstep(0.12, 0.55, h));
+  vec3 col = mix(vec3(0.062, 0.175, 0.230), vec3(0.010, 0.042, 0.075), smoothstep(0.0, 0.16, h));
+  col = mix(col, vec3(0.002, 0.008, 0.018), smoothstep(0.12, 0.55, h));
 
-  // 天际线整圈辉光（给群山剪影一个发光底）
-  col += vec3(0.10, 0.30, 0.38) * pow(clamp(1.0 - abs(h), 0.0, 1.0), 9.0) * 1.15;
+  // 地平线宽亮带（原图发光地平线：亮核 + 宽裙）
+  col += vec3(0.16, 0.44, 0.55) * pow(clamp(1.0 - abs(h), 0.0, 1.0), 13.0) * 1.35;
+  col += vec3(0.05, 0.16, 0.22) * pow(clamp(1.0 - abs(h), 0.0, 1.0), 5.0) * 0.55;
 
   // 左上冷光辉（基准图左侧天际亮斑，含月亮意象，克制）
   float glowL = exp(-pow((az + 0.42) * 3.4, 2.0)) * exp(-h * 14.0);
-  col += vec3(0.55, 0.72, 0.85) * glowL * 0.10;
+  col += vec3(0.55, 0.72, 0.85) * glowL * 0.14;
 
-  // 极光带：东北扇区（靠右缘）、贴地 2°~9°，竖向光柱条纹
-  float sect = smoothstep(0.30, 0.93, cos(az - 0.80));
-  float bandC = 0.055 + 0.030 * (az - 0.62);                      // 带中心随方位缓升
+  // 顶部全宽柔光（原图标题后背景亮青雾）
+  col += vec3(0.06, 0.17, 0.24) * pow(clamp(1.0 - abs(h), 0.0, 1.0), 3.0) * exp(-h * 2.4) * 0.38;
+
+  // 极光带：宽扇区细光柱，白青色调（原图极光洒落上缘左中）
+  float sect = smoothstep(0.22, 0.86, cos(az - 0.72));
+  float bandC = 0.08 + 0.036 * (az - 0.62);                       // 带中心随方位缓升
   float band = smoothstep(0.075, 0.008, abs(h - bandC));
-  float rays = fbm(vec2(az * 15.0, h * 34.0 - uTime * 0.05));     // 竖向光柱
+  float rays = fbm(vec2(az * 17.0, h * 42.0 - uTime * 0.06));     // 竖向光柱
   float drift = fbm(vec2(az * 3.0 + uTime * 0.015, h * 4.0));
-  float aur = band * sect * smoothstep(0.22, 0.62, drift) * (0.35 + 1.05 * rays);
-  vec3 aurCol = mix(vec3(0.09, 0.88, 0.60), vec3(0.14, 0.50, 0.95), clamp((h - 0.02) * 12.0, 0.0, 1.0));
-  col += aurCol * aur * 1.7;
+  float aur = band * sect * smoothstep(0.26, 0.70, drift) * (0.36 + 1.05 * rays);
+  vec3 aurCol = mix(vec3(0.40, 0.84, 0.95), vec3(0.14, 0.48, 0.84), clamp((h - 0.02) * 10.0, 0.0, 1.0));
+  col += aurCol * aur * 1.45;
   // 极光带的地面漫射微光
-  col += aurCol * sect * exp(-abs(h) * 9.0) * 0.22;
+  col += aurCol * sect * exp(-abs(h) * 11.0) * 0.16;
 
   // 星场：稀疏、近地平线淡出
   vec2 sp = d.xz / max(0.18, d.y + 0.28);

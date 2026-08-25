@@ -21,7 +21,7 @@ export default function Substation() {
     }
   }, [])
   const y = terrainHeight(SUBSTATION.x, SUBSTATION.z)
-  const W = 132, H = 52, D = 84
+  const W = 128, H = 76, D = 64
   return (
     <group position={[SUBSTATION.x, y, SUBSTATION.z]}>
       {/* 平台：暗底盘 + 同心光环 */}
@@ -51,11 +51,11 @@ export default function Substation() {
         </mesh>
       ))}
       {/* 三台主变 + 顶帽 */}
-      {[-44, 0, 44].map((dx, i) => (
-        <group key={i} position={[dx, 3, D / 2 + 16]}>
-          <mesh position={[0, 9, 0]} material={mats.dark}><cylinderGeometry args={[7.2, 7.2, 18, 10]} /></mesh>
-          <mesh position={[0, 9, 0]} material={mats.lattice}><cylinderGeometry args={[7.3, 7.3, 18.1, 10, 2]} /></mesh>
-          <mesh position={[0, 19.4, 0]} material={mats.core}><sphereGeometry args={[1.6, 10, 10]} /></mesh>
+      {[-38, 0, 38].map((dx, i) => (
+        <group key={i} position={[dx, 3, D / 2 + 13]}>
+          <mesh position={[0, 9, 0]} material={mats.dark}><cylinderGeometry args={[6.6, 6.6, 18, 10]} /></mesh>
+          <mesh position={[0, 9, 0]} material={mats.lattice}><cylinderGeometry args={[6.7, 6.7, 18.1, 10, 2]} /></mesh>
+          <mesh position={[0, 19.4, 0]} material={mats.core}><sphereGeometry args={[1.5, 10, 10]} /></mesh>
         </group>
       ))}
       {/* 屋顶双避雷针 */}
