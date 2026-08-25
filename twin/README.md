@@ -31,7 +31,7 @@ src/
     CableNetwork.tsx     三股电缆 + 河床辉光 + 晶粒 + 外送线束
     Substation.tsx       玻璃升压站
     SkyAurora.tsx         真实云层/银河天空纹理 + 原图冰青极光叠层
-    WorldTerrain.tsx      真实地形与贴地测量网格
+    WorldTerrain.tsx      深色 PBR 地形、程序微表面与动态科技网格
     SparkleGround/WindVeil/Callouts/CameraRig/Effects
 ```
 

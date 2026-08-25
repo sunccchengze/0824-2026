@@ -26,7 +26,7 @@ export default function App() {
         }}
       >
         <color attach="background" args={['#010305']} />
-        <fog attach="fog" args={['#030b14', 2100, 7300]} />
+        <fogExp2 attach="fog" args={['#040911', 0.00022]} />
         <hemisphereLight args={['#123448', '#010408', 0.42]} />
         <directionalLight position={[700, 900, -500]} intensity={0.32} color="#a8d9ff" />
         <directionalLight position={[-600, 500, 900]} intensity={0.16} color="#3f88b8" />
