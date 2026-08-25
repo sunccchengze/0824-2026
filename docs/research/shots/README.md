@@ -7,5 +7,6 @@
 - `r9_extended_closeup_t07.png`：R9，开场巡航延长到约 28 秒，最终推进到 T07 近景以检查真实翼型线框。
 - `r10_low_angle_closeup.png`：R10，终点改为低机位轻微仰视，主风机下半段自然出框，贴近用户参考构图。
 - `r11_continuous_spline_intro.png`：R11，改为单条连续 Catmull-Rom 运镜轨迹，经过全景构图节点时不停顿，最终保持低机位轻微仰视。
+- `r12_drone_aerial_showcase.png`：R12，加入正上方俯瞰、远处绕场、快速前推、机组间穿梭与机身侧倾节点，开场总长约 34 秒。
 
 截图脚本在沙箱中使用 SwiftShader；其边缘颗粒属于软件渲染伪影，真机 GPU 预览会更干净。
