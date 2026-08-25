@@ -42,7 +42,7 @@ void main() {
   float scan = 0.5 + 0.5 * sin(vLocal.y * 0.32 - uTime * 2.2);
   float scanBand = smoothstep(0.80, 1.0, scan);
   vec3 color = uColor * (0.24 + fresnel * 1.08 + scanBand * 0.18);
-  float alpha = 0.018 + fresnel * 0.060 + scanBand * 0.016;
+  float alpha = 0.012 + fresnel * 0.045 + scanBand * 0.012;
   gl_FragColor = vec4(color, alpha);
 }
 `
@@ -67,7 +67,7 @@ function makeWireMaterial() {
   return new THREE.MeshBasicMaterial({
     color: HOLO_WHITE,
     transparent: true,
-    opacity: 0.15,
+    opacity: 0.22,
     wireframe: true,
     blending: THREE.NormalBlending,
     depthWrite: false,
@@ -81,7 +81,7 @@ function makeEdgeMaterial() {
   return new THREE.LineBasicMaterial({
     color: HOLO_WHITE_HI,
     transparent: true,
-    opacity: 0.64,
+    opacity: 0.85,
     blending: THREE.NormalBlending,
     depthWrite: false,
     fog: false,
@@ -150,7 +150,7 @@ export default function HoloTurbine({ x, z, y, yawDeg, speed, servo }: {
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime
     surfaceRef.current.uniforms.uTime.value = t
-    edgeRef.current.opacity = 0.57 + Math.sin(t * 1.6 + x * 0.01 + z * 0.008) * 0.08
+    edgeRef.current.opacity = 0.78 + Math.sin(t * 1.6 + x * 0.01 + z * 0.008) * 0.06
     if (spin.current) spin.current.rotation.z += dt * speed * 1.15
     if (root.current) {
       const target = D2R(yawDeg)
