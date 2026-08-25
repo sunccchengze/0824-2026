@@ -16,10 +16,6 @@ export interface AlarmItem {
 }
 
 export interface SimState {
-  // 渲染模式：'holo' 全息（原图像素还原）| 'real' NREL 5MW 写实（R3）
-  mode: 'holo' | 'real'
-  setMode: (m: 'holo' | 'real') => void
-
   // 5 路导颈舵机（原图 yaw=+/-10° 档），对应 turbine/SERVOS 索引
   servos: number[]
   setServo: (i: number, v: number) => void
@@ -49,11 +45,6 @@ const ALARM_SEED: AlarmItem[] = [
 const MATRIX0: boolean[] = [true, true, false, true, true, false, true, false, true, true, false, true]
 
 export const useSim = create<SimState>((set) => ({
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // 深链 ?mode=real 直接进写实模式（R3 NREL 5MW）
-  mode: typeof location !== 'undefined' && new URLSearchParams(location.search).get('mode') === 'real' ? 'real' : 'holo',
-  setMode: (m) => set({ mode: m }),
-
   servos: [...M0],
   setServo: (i, v) =>
     set((s) => {

@@ -287,8 +287,6 @@ function CornerWings({ flip }: { flip?: boolean }) {
 /* ---------- 主组件 ---------- */
 export default function Hud() {
   const scale = useStageScale()
-  const mode = useSim((s) => s.mode)
-  const setMode = useSim((s) => s.setMode)
   const playing = useSim((s) => s.playing)
   const togglePlay = useSim((s) => s.togglePlay)
   const tHours = useSim((s) => s.tHours)
@@ -411,12 +409,8 @@ export default function Hud() {
           </svg>
         </footer>
 
-        {/* ===== 浮动控件（不侵入原图） ===== */}
-        <div className="fmode">
-          <button className={mode === 'holo' ? 'on' : ''} onClick={() => setMode('holo')}>全息</button>
-          <button className={mode === 'real' ? 'on' : ''} onClick={() => setMode('real')}>写实</button>
-          <span className="note">演示数据 DEMO</span>
-        </div>
+        {/* 真实几何已统一全息化；保留原图右下角的演示数据标识，不再显示模式切换。 */}
+        <div className="demo-note">演示数据 DEMO</div>
       </div>
     </div>
   )

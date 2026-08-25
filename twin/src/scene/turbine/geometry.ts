@@ -152,25 +152,10 @@ export function getTurbineGeos(): TurbineGeoSet {
   return cached
 }
 
-/** 机身 PBR 材质组（冰青夜色下的冷白机身 + 极地月光响应） */
-export function getTurbineMats() {
-  const sheath = new THREE.MeshPhysicalMaterial({
-    color: '#eef3f8', roughness: 0.3, metalness: 0.05,
-    clearcoat: 0.45, clearcoatRoughness: 0.28,
-    emissive: '#0d3547', emissiveIntensity: 0.3, // 冰青夜场底色微融
-    side: THREE.DoubleSide,
-  })
-  const body = new THREE.MeshPhysicalMaterial({
-    color: '#e2e9ef', roughness: 0.38, metalness: 0.08,
-    clearcoat: 0.3, clearcoatRoughness: 0.35,
-    emissive: '#0a2e3e', emissiveIntensity: 0.26,
-    side: THREE.DoubleSide,
-  })
-  const dark = new THREE.MeshPhysicalMaterial({ color: '#2c3640', roughness: 0.62, metalness: 0.3 })
-  const beacon = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.75, 1.9, 2.4), transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
-  return { sheath, body, dark, beacon }
-}
-
+/**
+ * 材质已统一在 HoloTurbine.tsx 中生成：几何文件只负责真实比例，避免
+ * 白色 PBR 皮肤重新进入渲染链，所有 9 台机组都保持透明冰青线条化。
+ */
 export const TURBINE_SPEC = {
   hubY: 90.0,       // 轮毂高 90 m
   towerTop: 87.6,

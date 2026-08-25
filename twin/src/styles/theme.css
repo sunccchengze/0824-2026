@@ -256,15 +256,10 @@ button { font-family: inherit; }
 .wcall.r .wline { background: linear-gradient(270deg, rgba(140, 230, 255, 0.95), rgba(140, 230, 255, 0.25)); }
 .wcall.r .wtext { margin: 0 7px 0 0; text-align: right; }
 
-/* ===== 浮动模式切换（右下角，不侵入原图版式） ===== */
-.fmode {
-  position: absolute; right: 18px; bottom: 52px;
-  display: flex; align-items: center; gap: 4px;
-  pointer-events: auto;
+/* ===== 原图右下角演示标识：不再提供全息/写实模式切换 ===== */
+.demo-note {
+  position: absolute; right: 18px; bottom: 54px;
+  font-size: 9px; letter-spacing: 0.18em;
+  color: rgba(110, 160, 195, 0.75);
+  pointer-events: none;
 }
-.fmode button {
-  border: 1px solid rgba(110, 210, 255, 0.45); background: rgba(8, 26, 40, 0.8);
-  color: #8fc6e4; font-size: 11px; letter-spacing: 0.12em; padding: 4px 10px; cursor: pointer;
-}
-.fmode button.on { background: rgba(50, 140, 190, 0.4); color: #eafaff; box-shadow: 0 0 8px rgba(90, 210, 255, 0.4); }
-.fmode .note { margin-left: 8px; font-size: 9px; letter-spacing: 0.18em; color: rgba(110, 160, 195, 0.75); }

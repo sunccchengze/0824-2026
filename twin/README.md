@@ -1,7 +1,7 @@
 # AEOLUS TWIN — 风电场 3A 数字孪生大屏
 
 > 用户原图「未来能源数字孪生系统」的像素级还原实现（1920×1080 大屏）。
-> 场景：冰青全息风电场（默认）⇄ NREL 5MW 写实机组（`?mode=real` 或右下角切换）。
+> 场景：NREL 5MW 真实几何已经统一透明化、线条化为冰青全息风电场；不再提供全息/写实二选一。
 
 ## 技术栈
 Vite 8 + React 19 + TS + three 0.185 + R3F 9 + drei + @react-three/postprocessing + zustand。
@@ -20,14 +20,14 @@ node scripts/shot.mjs <url> <out.png> [waitMs] [w] [h]   # 离屏自拍（沙箱
 ```
 src/
   App.tsx                场景装配 + 相机 + 后期链
-  state/simStore.ts      舵机 5 路 / 模式 / 时间轴 / 报警 / 矩阵
+  state/simStore.ts      舵机 5 路 / 时间轴 / 报警 / 矩阵
   hud/Hud.tsx            大屏 HUD（1920×1080 等比舞台）
   styles/theme.css       全套皮肤
   scene/
     terrainUtil.ts       世界真值源（地形/机位/升压站/锚点）
-    HoloTurbine.tsx      冰青全息风机（fresnel 发光 + 加色内芯）
-    turbine/geometry.ts  NREL 5MW 参数化写实机（R3）
-    TurbineField.tsx     9 机阵列 + 舵机联动（holo/real 切换）
+    HoloTurbine.tsx      NREL 5MW 真实几何的透明线框全息化 + 弥散光晕
+    turbine/geometry.ts  NREL 5MW 参数化真实几何
+    TurbineField.tsx     9 机阵列 + 舵机联动（统一全息）
     CableNetwork.tsx     三股电缆 + 河床辉光 + 晶粒 + 外送线束
     Substation.tsx       玻璃升压站
     SkyAurora/WorldTerrain/SparkleGround/WindVeil/Callouts/CameraRig/Effects
