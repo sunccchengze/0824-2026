@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { getTurbineGeos, TURBINE_SPEC as S, type TurbineGeoSet } from './turbine/geometry'
@@ -9,14 +9,13 @@ import { getTurbineGeos, TURBINE_SPEC as S, type TurbineGeoSet } from './turbine
 // 不再使用一套“卡通全息风机”或白色 PBR 风机：这里直接复用真实机组的
 // 塔筒、机舱、轮毂和 18 站位翼型叶片几何，再用透明扫描材质 + 线框 +
 // 清晰边线重建成冰青色数字孪生。这样既保留真实风机的结构比例，也完全
-// 融入原图的全息氛围。
+// 融入原图的全息氛围；本版去掉机组周围的径向弥散光晕，只保留结构线的 Bloom。
 // ============================================================================
 
 const D2R = THREE.MathUtils.degToRad
-// 刻意使用低于白色的冰青能量值：即使经过 Bloom，机组仍保持“蓝青线条”，
-// 不会回到上一版刺眼的白色实体风机。
-const HOLO_CYAN = new THREE.Color(0.025, 0.30, 0.50)
-const HOLO_HI = new THREE.Color(0.075, 0.52, 0.72)
+// 提高冰青能量值，让线条更接近白青色，但不恢复白色实体 PBR 机身。
+const HOLO_CYAN = new THREE.Color(0.085, 0.64, 0.84)
+const HOLO_HI = new THREE.Color(0.25, 0.94, 1.12)
 
 const SURFACE_VERT = /* glsl */ `
 varying vec3 vNormal;
@@ -69,7 +68,7 @@ function makeWireMaterial() {
   return new THREE.MeshBasicMaterial({
     color: HOLO_CYAN,
     transparent: true,
-    opacity: 0.105,
+    opacity: 0.15,
     wireframe: true,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
@@ -83,7 +82,7 @@ function makeEdgeMaterial() {
   return new THREE.LineBasicMaterial({
     color: HOLO_HI,
     transparent: true,
-    opacity: 0.55,
+    opacity: 0.64,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     fog: false,
@@ -112,48 +111,6 @@ function getTurbineEdges(geos: TurbineGeoSet): EdgeSet {
     beacon: new THREE.EdgesGeometry(geos.beacon, 12),
   }
   return edgeCache
-}
-
-/** 柔和的径向光晕纹理：用于风机周围的弥散能量，不是白色实体灯。 */
-let glowTexture: THREE.CanvasTexture | null = null
-function getGlowTexture() {
-  if (glowTexture) return glowTexture
-  const canvas = document.createElement('canvas')
-  canvas.width = 128
-  canvas.height = 128
-  const ctx = canvas.getContext('2d')!
-  const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64)
-  gradient.addColorStop(0, 'rgba(150,245,255,0.48)')
-  gradient.addColorStop(0.18, 'rgba(45,210,255,0.24)')
-  gradient.addColorStop(0.52, 'rgba(25,145,220,0.09)')
-  gradient.addColorStop(1, 'rgba(0,60,120,0)')
-  ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, 128, 128)
-  glowTexture = new THREE.CanvasTexture(canvas)
-  glowTexture.colorSpace = THREE.SRGBColorSpace
-  glowTexture.needsUpdate = true
-  return glowTexture
-}
-
-function AuraSprite({ position, scale, opacity }: {
-  position: [number, number, number]
-  scale: [number, number, number]
-  opacity: number
-}) {
-  const material = useMemo(() => new THREE.SpriteMaterial({
-    map: getGlowTexture(),
-    color: new THREE.Color(0.018, 0.32, 0.54),
-    transparent: true,
-    opacity,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    depthTest: false,
-    fog: false,
-    toneMapped: false,
-  }), [opacity])
-
-  useEffect(() => () => material.dispose(), [material])
-  return <sprite position={position} scale={scale} material={material} />
 }
 
 type HoloPartProps = {
@@ -194,7 +151,7 @@ export default function HoloTurbine({ x, z, y, yawDeg, speed, servo }: {
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime
     surfaceRef.current.uniforms.uTime.value = t
-    edgeRef.current.opacity = 0.47 + Math.sin(t * 1.6 + x * 0.01 + z * 0.008) * 0.08
+    edgeRef.current.opacity = 0.57 + Math.sin(t * 1.6 + x * 0.01 + z * 0.008) * 0.08
     if (spin.current) spin.current.rotation.z += dt * speed * 1.15
     if (root.current) {
       const target = D2R(yawDeg)
@@ -204,10 +161,6 @@ export default function HoloTurbine({ x, z, y, yawDeg, speed, servo }: {
 
   return (
     <group position={[x, y, z]}>
-      {/* 两层弥散光晕：塔筒接地能量 + 轮毂周围的空气辉光 */}
-      <AuraSprite position={[0, 44, 0]} scale={[54, 132, 1]} opacity={0.105} />
-      <AuraSprite position={[0, 91, 5]} scale={[148, 112, 1]} opacity={0.075} />
-
       {/* 数字孪生基座：黑色吸光盘与冰青能量环 */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.55, 0]}>
         <circleGeometry args={[13, 48]} />
@@ -215,16 +168,16 @@ export default function HoloTurbine({ x, z, y, yawDeg, speed, servo }: {
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.9, 0]}>
         <ringGeometry args={[9.2, 10.4, 64]} />
-        <meshBasicMaterial color={new THREE.Color(0.015, 0.32, 0.50)} transparent opacity={0.38} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
+        <meshBasicMaterial color={new THREE.Color(0.045, 0.55, 0.72)} transparent opacity={0.42} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 1.05, 0]}>
         <ringGeometry args={[4.0, 4.42, 56]} />
-        <meshBasicMaterial color={new THREE.Color(0.025, 0.55, 0.75)} transparent opacity={0.52} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
+        <meshBasicMaterial color={new THREE.Color(0.10, 0.85, 1.05)} transparent opacity={0.60} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
       </mesh>
       {servo && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 2.0, 0]}>
           <ringGeometry args={[13.5, 14.7, 72]} />
-          <meshBasicMaterial color={new THREE.Color(0.035, 0.62, 0.82)} transparent opacity={0.56} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
+          <meshBasicMaterial color={new THREE.Color(0.13, 0.92, 1.12)} transparent opacity={0.64} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
         </mesh>
       )}
 
