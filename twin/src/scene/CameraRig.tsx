@@ -28,7 +28,9 @@ const CAMERA_NODES = [
   new THREE.Vector3(-100, 1720, -640), // 正上空起始点
   new THREE.Vector3(-100, 720, -640), // 竖直俯冲
   new THREE.Vector3(-100, 300, -640), // 俯冲最低点
-  new THREE.Vector3(-100, 390, 250), // 上抬、向后倒退
+  new THREE.Vector3(-100, 300, -520), // 保持低位，先开始向后退
+  new THREE.Vector3(-100, 330, -200), // 微抬并继续倒退
+  new THREE.Vector3(-100, 390, 250), // 平顺抬头进入远景
   new THREE.Vector3(60, 480, 990), // 全景构图
   new THREE.Vector3(120, 470, 900), // 全景缓行，不停顿但放慢
   new THREE.Vector3(NINE.x + 145, 210, NINE.z - 160), // 快速前推至 9 号
@@ -42,7 +44,9 @@ const LOOK_NODES = [
   new THREE.Vector3(-100, 0, -640), // 正上空向下看阵列中心
   new THREE.Vector3(-100, 0, -640), // 俯冲保持垂直视线
   new THREE.Vector3(-100, 0, -640),
-  new THREE.Vector3(-100, 150, -640), // 镜头上抬
+  new THREE.Vector3(-100, 15, -640), // 先只抬一点，衔接后退
+  new THREE.Vector3(-100, 70, -640), // 连续抬头
+  new THREE.Vector3(-100, 110, -640), // 进入远景视线
   new THREE.Vector3(-100, 120, -640), // 全景看向场区
   new THREE.Vector3(-100, 120, -640),
   new THREE.Vector3(NINE.x, 96, NINE.z), // 锁定 9 号
