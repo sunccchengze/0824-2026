@@ -46,7 +46,7 @@ export default function App() {
           makeDefault
           target={CAM.target}
           maxPolarAngle={Math.PI / 2.06}
-          minDistance={260}
+          minDistance={120}
           maxDistance={4600}
           enableDamping
           dampingFactor={0.06}
