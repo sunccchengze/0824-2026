@@ -44,7 +44,8 @@ export default function WorldTerrain() {
     map.colorSpace = THREE.SRGBColorSpace
     map.wrapS = THREE.RepeatWrapping
     map.wrapT = THREE.RepeatWrapping
-    map.repeat.set(3.4, 3.4)
+    // 细节纹理缩到 7.2 倍：远景保留碎石肌理，近景不会出现几块夸张巨石。
+    map.repeat.set(7.2, 7.2)
     map.anisotropy = 8
 
     // 同一张高细节灰度起伏作为轻微 bump，补出近景碎石的真实微表面。

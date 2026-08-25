@@ -44,21 +44,27 @@ const smoothstep = (e0: number, e1: number, x: number) => {
 
 // ---- 地形：暗海式场区（近似海面微起伏）+ 西北群山剪影（地平线带）----
 export function terrainHeight(x: number, z: number): number {
-  let h = N.ridged(x * 0.00052, z * 0.00052) * 42
-    + N.fbm(x * 0.0016, z * 0.0016) * 14
-    + N.fbm(x * 0.0065, z * 0.0065) * 2.4
-    - 26
-  // 中央场区压平（椭圆谷地）
+  // 三层尺度：远景山脊、场区缓坡、近景碎石起伏。远处不再是一块平板，
+  // 但机组基础附近仍保留可施工的缓坡，保证风机、电缆和升压站自然贴地。
+  let h = N.ridged(x * 0.00042, z * 0.00042) * 72
+    + N.fbm(x * 0.00088, z * 0.00088) * 30
+    + N.fbm(x * 0.0048, z * 0.0048) * 4.0
+    - 38
+  // 中央风场轻压平：保留 10% 的大尺度地形起伏，不做完全水平的“海面”。
   const dF = Math.hypot(x / 1.06, (z + 320) / 0.94)
-  h *= 1 - 0.86 * smoothstep(980, 380, dF)
+  const fieldFlatten = 1 - 0.78 * smoothstep(1060, 360, dF)
+  h *= fieldFlatten
+  // 场区外叠加低频宏观山脊；从风场向远处逐渐增强，形成真实纵深。
+  const macro = (N.fbm(x * 0.00072 + 4.1, z * 0.00072 - 2.7, 5) - 0.46) * 130
+  h += macro * (0.10 + 0.90 * smoothstep(360, 1250, dF))
   // 升压站局地再压平
   const dS = Math.hypot(x - SUBSTATION.x, z - SUBSTATION.z)
   h *= 1 - 0.92 * smoothstep(300, 130, dS)
-  // 西北远山（地平线剪影带，画面左/上）
-  h += 150 * smoothstep(-700, -2400, z) * (0.42 + 0.58 * N.fbm(x * 0.0006, 7.7, 3))
-  h += 120 * smoothstep(-950, -2100, x) * (0.5 + 0.5 * N.fbm(z * 0.0007, 3.3, 3))
+  // 西北远山（地平线剪影带，画面左/上）：加强层次，但保持原冰青暗色。
+  h += 235 * smoothstep(-650, -2400, z) * (0.34 + 0.66 * N.fbm(x * 0.00055, 7.7, 4))
+  h += 180 * smoothstep(-900, -2200, x) * (0.44 + 0.56 * N.fbm(z * 0.00064, 3.3, 4))
   // 东侧远丘（右缘低剪影）
-  h += 70 * smoothstep(1150, 2500, x) * (0.4 + 0.6 * N.fbm(z * 0.00072, 13.1, 3))
+  h += 105 * smoothstep(1050, 2500, x) * (0.36 + 0.64 * N.fbm(z * 0.00066, 13.1, 4))
   return h
 }
 
