@@ -30,7 +30,9 @@ src/
     TurbineField.tsx     9 机阵列 + 舵机联动（统一全息）
     CableNetwork.tsx     三股电缆 + 河床辉光 + 晶粒 + 外送线束
     Substation.tsx       玻璃升压站
-    SkyAurora/WorldTerrain/SparkleGround/WindVeil/Callouts/CameraRig/Effects
+    SkyAurora.tsx         真实云层/银河天空纹理 + 原图冰青极光叠层
+    WorldTerrain.tsx      真实地形与贴地测量网格
+    SparkleGround/WindVeil/Callouts/CameraRig/Effects
 ```
 
 ## 与原图口径差异（演示数据，非 FLORIS 求解）
