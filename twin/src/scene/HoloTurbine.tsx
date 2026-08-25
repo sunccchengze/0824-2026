@@ -6,16 +6,15 @@ import { getTurbineGeos, TURBINE_SPEC as S, type TurbineGeoSet } from './turbine
 // ============================================================================
 // NREL 5MW 真实几何的全息化版本
 //
-// 不再使用一套“卡通全息风机”或白色 PBR 风机：这里直接复用真实机组的
-// 塔筒、机舱、轮毂和 18 站位翼型叶片几何，再用透明扫描材质 + 线框 +
-// 清晰边线重建成冰青色数字孪生。这样既保留真实风机的结构比例，也完全
-// 融入原图的全息氛围；本版去掉机组周围的径向弥散光晕，只保留结构线的 Bloom。
+// 这里直接复用真实机组的塔筒、机舱、轮毂和 18 站位翼型叶片几何，
+// 再用透明扫描材质 + 线框 + 清晰边线重建成纯白色数字孪生。这样既保留
+// 真实风机的结构比例，也完全融入原图的全息氛围；不使用实体 PBR 皮肤。
 // ============================================================================
 
 const D2R = THREE.MathUtils.degToRad
-// 提高冰青能量值，让线条更接近白青色，但不恢复白色实体 PBR 机身。
-const HOLO_CYAN = new THREE.Color(0.085, 0.64, 0.84)
-const HOLO_HI = new THREE.Color(0.25, 0.94, 1.12)
+// 风机专用纯白能量色：RGB 三通道完全一致，HUD 与电缆仍保持冰青配色。
+const HOLO_WHITE = new THREE.Color(1.0, 1.0, 1.0)
+const HOLO_WHITE_HI = new THREE.Color(1.0, 1.0, 1.0)
 
 const SURFACE_VERT = /* glsl */ `
 varying vec3 vNormal;
@@ -53,7 +52,7 @@ function makeSurfaceMaterial() {
     vertexShader: SURFACE_VERT,
     fragmentShader: SURFACE_FRAG,
     uniforms: {
-      uColor: { value: HOLO_CYAN.clone() },
+      uColor: { value: HOLO_WHITE.clone() },
       uTime: { value: 0 },
     },
     transparent: true,
@@ -66,7 +65,7 @@ function makeSurfaceMaterial() {
 
 function makeWireMaterial() {
   return new THREE.MeshBasicMaterial({
-    color: HOLO_CYAN,
+    color: HOLO_WHITE,
     transparent: true,
     opacity: 0.15,
     wireframe: true,
@@ -80,7 +79,7 @@ function makeWireMaterial() {
 
 function makeEdgeMaterial() {
   return new THREE.LineBasicMaterial({
-    color: HOLO_HI,
+    color: HOLO_WHITE_HI,
     transparent: true,
     opacity: 0.64,
     blending: THREE.AdditiveBlending,
@@ -168,16 +167,16 @@ export default function HoloTurbine({ x, z, y, yawDeg, speed, servo }: {
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.9, 0]}>
         <ringGeometry args={[9.2, 10.4, 64]} />
-        <meshBasicMaterial color={new THREE.Color(0.045, 0.55, 0.72)} transparent opacity={0.42} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
+        <meshBasicMaterial color={new THREE.Color(1.0, 1.0, 1.0)} transparent opacity={0.42} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 1.05, 0]}>
         <ringGeometry args={[4.0, 4.42, 56]} />
-        <meshBasicMaterial color={new THREE.Color(0.10, 0.85, 1.05)} transparent opacity={0.60} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
+        <meshBasicMaterial color={new THREE.Color(1.0, 1.0, 1.0)} transparent opacity={0.60} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
       </mesh>
       {servo && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 2.0, 0]}>
           <ringGeometry args={[13.5, 14.7, 72]} />
-          <meshBasicMaterial color={new THREE.Color(0.13, 0.92, 1.12)} transparent opacity={0.64} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
+          <meshBasicMaterial color={new THREE.Color(1.0, 1.0, 1.0)} transparent opacity={0.64} blending={THREE.AdditiveBlending} depthWrite={false} fog={false} toneMapped={false} />
         </mesh>
       )}
 

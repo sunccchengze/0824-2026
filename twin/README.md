@@ -1,7 +1,7 @@
 # AEOLUS TWIN — 风电场 3A 数字孪生大屏
 
 > 用户原图「未来能源数字孪生系统」的像素级还原实现（1920×1080 大屏）。
-> 场景：NREL 5MW 真实几何已经统一透明化、线条化为冰青全息风电场；不再提供全息/写实二选一。
+> 场景：NREL 5MW 真实几何已经统一透明化、线条化为纯白全息风电场；不再提供全息/写实二选一。
 
 ## 技术栈
 Vite 8 + React 19 + TS + three 0.185 + R3F 9 + drei + @react-three/postprocessing + zustand。
@@ -25,7 +25,7 @@ src/
   styles/theme.css       全套皮肤
   scene/
     terrainUtil.ts       世界真值源（地形/机位/升压站/锚点）
-    HoloTurbine.tsx      NREL 5MW 真实几何的透明线框全息化 + 弥散光晕
+    HoloTurbine.tsx      NREL 5MW 真实几何的透明纯白线框全息化
     turbine/geometry.ts  NREL 5MW 参数化真实几何
     TurbineField.tsx     9 机阵列 + 舵机联动（统一全息）
     CableNetwork.tsx     三股电缆 + 河床辉光 + 晶粒 + 外送线束
