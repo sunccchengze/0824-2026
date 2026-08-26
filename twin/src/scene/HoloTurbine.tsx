@@ -80,12 +80,14 @@ function makeWireMaterial() {
 function makeEdgeMaterial() {
   return new THREE.LineBasicMaterial({
     color: HOLO_WHITE_HI,
-    transparent: true,
-    opacity: 0.85,
+    // 轮廓线使用不透明纯白，透明感由低 alpha 的实体层和稀疏线框提供；
+    // 这样远景不会因半透明叠加变成脏灰，同时也不会进入 Bloom。
+    transparent: false,
+    opacity: 1.0,
     blending: THREE.NormalBlending,
     depthWrite: false,
     fog: false,
-    toneMapped: true,
+    toneMapped: false,
   })
 }
 
