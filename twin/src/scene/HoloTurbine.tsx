@@ -66,11 +66,13 @@ function makeSurfaceMaterial() {
 function makeWireMaterial() {
   return new THREE.MeshBasicMaterial({
     color: HOLO_WHITE,
-    transparent: true,
-    opacity: 0.34,
+    // 线框本身也使用不透明纯白，避免远景 1px 结构线在透明混合后变灰。
+    transparent: false,
+    opacity: 1.0,
     wireframe: true,
     blending: THREE.NormalBlending,
     depthWrite: false,
+    depthTest: false,
     side: THREE.DoubleSide,
     fog: false,
     toneMapped: false,
@@ -131,7 +133,7 @@ function HoloPart({ geometry, edge, surface, wire, line, position, rotation, sca
   return (
     <group position={position} rotation={rotation} scale={scale}>
       <mesh geometry={geometry} material={surface} />
-      <mesh geometry={geometry} material={wire} />
+      <mesh geometry={geometry} material={wire} renderOrder={3} />
       <lineSegments geometry={edge} material={line} scale={[1.003, 1.003, 1.003]} renderOrder={4} />
     </group>
   )
@@ -153,7 +155,7 @@ export default function HoloTurbine({ x, z, y, yawDeg, speed, servo }: {
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime
     surfaceRef.current.uniforms.uTime.value = t
-    edgeRef.current.opacity = 0.78 + Math.sin(t * 1.6 + x * 0.01 + z * 0.008) * 0.06
+    edgeRef.current.opacity = 1.0
     if (spin.current) spin.current.rotation.z += dt * speed * 1.15
     if (root.current) {
       const target = D2R(yawDeg)
