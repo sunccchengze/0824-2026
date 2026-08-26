@@ -59,7 +59,7 @@ function makeSurfaceMaterial() {
     depthWrite: false,
     side: THREE.DoubleSide,
     blending: THREE.NormalBlending,
-    toneMapped: true,
+    toneMapped: false,
   })
 }
 
@@ -67,13 +67,13 @@ function makeWireMaterial() {
   return new THREE.MeshBasicMaterial({
     color: HOLO_WHITE,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.34,
     wireframe: true,
     blending: THREE.NormalBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
     fog: false,
-    toneMapped: true,
+    toneMapped: false,
   })
 }
 
@@ -86,6 +86,7 @@ function makeEdgeMaterial() {
     opacity: 1.0,
     blending: THREE.NormalBlending,
     depthWrite: false,
+    depthTest: false,
     fog: false,
     toneMapped: false,
   })
@@ -131,7 +132,7 @@ function HoloPart({ geometry, edge, surface, wire, line, position, rotation, sca
     <group position={position} rotation={rotation} scale={scale}>
       <mesh geometry={geometry} material={surface} />
       <mesh geometry={geometry} material={wire} />
-      <lineSegments geometry={edge} material={line} scale={[1.003, 1.003, 1.003]} />
+      <lineSegments geometry={edge} material={line} scale={[1.003, 1.003, 1.003]} renderOrder={4} />
     </group>
   )
 }
