@@ -7,8 +7,8 @@ import { getTurbineGeos, TURBINE_SPEC as S, type TurbineGeoSet } from './turbine
 // NREL 5MW 真实几何的全息化版本
 //
 // 这里直接复用真实机组的塔筒、机舱、轮毂和 18 站位翼型叶片几何，
-// 再用纯白不透明实体 + 线框 + 清晰边线重建成数字孪生。这样既保留
-// 真实风机的结构比例，也确保风机在任何背景下都不会被压成灰色。
+// 再用透明低 alpha 体积提示 + 纯白边框 / 线框重建成数字孪生。这样既保留
+// 真实风机的结构比例，也确保所有可见结构边界在任何背景下都是纯白。
 // ============================================================================
 
 const D2R = THREE.MathUtils.degToRad
@@ -37,9 +37,13 @@ varying vec3 vLocal;
 uniform vec3 uColor;
 uniform float uTime;
 void main() {
-  // 风机现在是纯白不透明模型：不再使用透明 alpha 或 Fresnel 灰阶。
-  // 这样无论背景是天空、山体还是黑场，主体都保持干净的白色。
-  gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+  // 只保留极淡的透明体积提示；真正的主体边框由下面的纯白 wireframe
+  // 和 EdgesGeometry 绘制，绝不把风机内部填成白色。
+  float facing = max(dot(normalize(vNormal), normalize(vView)), 0.0);
+  float fresnel = pow(1.0 - facing, 2.35);
+  float scan = 0.5 + 0.5 * sin(vLocal.y * 0.32 - uTime * 2.2);
+  float alpha = 0.012 + fresnel * 0.028 + scan * 0.006;
+  gl_FragColor = vec4(vec3(0.025, 0.055, 0.068), alpha);
 }
 `
 
@@ -51,8 +55,8 @@ function makeSurfaceMaterial() {
       uColor: { value: HOLO_WHITE.clone() },
       uTime: { value: 0 },
     },
-    transparent: false,
-    depthWrite: true,
+    transparent: true,
+    depthWrite: false,
     depthTest: true,
     side: THREE.DoubleSide,
     blending: THREE.NormalBlending,
@@ -126,7 +130,7 @@ type HoloPartProps = {
   scale?: [number, number, number]
 }
 
-/** 纯白实体 + 三角线框 + 清晰轮廓线，构成真实模型的高亮全息层。 */
+/** 透明体积提示 + 纯白三角线框 + 纯白轮廓线，构成真实模型的高亮全息层。 */
 function HoloPart({ geometry, edge, surface, wire, line, position, rotation, scale }: HoloPartProps) {
   return (
     <group position={position} rotation={rotation} scale={scale}>
