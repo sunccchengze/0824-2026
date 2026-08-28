@@ -21,7 +21,7 @@ export default function Substation() {
     }
   }, [])
   const y = terrainHeight(SUBSTATION.x, SUBSTATION.z)
-  const W = 128, H = 76, D = 64
+  const W = 112, H = 30, D = 52
   return (
     <group position={[SUBSTATION.x, y, SUBSTATION.z]}>
       {/* 平台：暗底盘 + 同心光环 */}
@@ -45,7 +45,7 @@ export default function Substation() {
         <boxGeometry args={[W, H, D, 8, 5, 6]} />
       </mesh>
       {/* 四层母排辉光 */}
-      {[16, 29, 42, 53].map((h, i) => (
+      {[8, 15, 22].map((h, i) => (
         <mesh key={i} position={[0, h + 3, (i % 2 ? -1 : 1) * 10]} material={mats.core} renderOrder={4}>
           <boxGeometry args={[W * 0.76, 2.4, 11]} />
         </mesh>
@@ -61,8 +61,8 @@ export default function Substation() {
       {/* 屋顶双避雷针 */}
       {[-40, 40].map((dx, i) => (
         <group key={i} position={[dx, H + 3, 0]}>
-          <mesh position={[0, 17, 0]} material={mats.rail}><cylinderGeometry args={[0.7, 0.7, 34, 6]} /></mesh>
-          <mesh position={[0, 34.8, 0]} material={mats.core}><sphereGeometry args={[1.15, 8, 8]} /></mesh>
+          <mesh position={[0, 9, 0]} material={mats.rail}><cylinderGeometry args={[0.5, 0.5, 18, 6]} /></mesh>
+          <mesh position={[0, 18.8, 0]} material={mats.core}><sphereGeometry args={[0.8, 8, 8]} /></mesh>
         </group>
       ))}
       {/* 周界光桩 */}
