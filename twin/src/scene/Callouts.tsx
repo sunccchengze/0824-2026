@@ -4,7 +4,7 @@ import { ANCHOR } from './terrainUtil'
 // ================================================================
 // 世界标注（DOM 引线标签）
 // 文案 = 用户原图原文（像素级还原口径）
-// 每个锚点都贴在真实地形上方 3~5m 的位置，不会悬空。
+// 每个锚点按语义放置，标签与设备保持可读间距。
 // ================================================================
 const ITEMS: {
   at: { x: number; y: number; z: number }
@@ -14,10 +14,10 @@ const ITEMS: {
   line?: number
 }[] = [
   { at: ANCHOR.power,      side: 'r', zh: '全场功率总览', en: 'Total Power Pool',        line: 58 },
-  { at: ANCHOR.wake,       side: 'l', zh: '风况渔能场',   en: 'Wind speed',               line: 46 },
-  { at: ANCHOR.turbine,    side: 'r', zh: '风机分组',     en: 'Turbine Group',            line: 42 },
-  { at: ANCHOR.cable,      side: 'r', zh: '电缆落地',     en: 'Electrical Cable Landing', line: 40 },
-  { at: ANCHOR.substation, side: 'l', zh: '连线站座',     en: 'Substation',               line: 48 },
+  { at: ANCHOR.wake,       side: 'l', zh: '风能资源场',   en: 'Wind speed',               line: 46 },
+  { at: ANCHOR.turbine,    side: 'r', zh: '风机',     en: 'Turbine Group',            line: 42 },
+  { at: ANCHOR.cable,      side: 'r', zh: '集电线路',     en: 'Electrical Cable Landing', line: 40 },
+  { at: ANCHOR.substation, side: 'l', zh: '升压站',     en: 'Substation',               line: 48 },
 ]
 
 export default function Callouts() {

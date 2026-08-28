@@ -22,7 +22,7 @@ export default function TurbineField() {
             x={u.x}
             z={u.z}
             y={terrainHeight(u.x, u.z)}
-            yawDeg={yawDeg + 8}
+            yawDeg={yawDeg}
             speed={u.speed}
             servo={servoIdx >= 0}
           />

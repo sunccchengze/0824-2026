@@ -67,13 +67,13 @@ function Matrix() {
 
 /* ---------- 风况雷达（360° 花瓣 + 扫描线） ---------- */
 const RADAR_DIRS = [
-  { t: '2NW', a: -135 }, { t: 'N', a: -90 }, { t: 'NE', a: -45 },
-  { t: 'EE', a: 0 }, { t: 'SSE', a: 45 }, { t: 'SW', a: 135 },
-  { t: '2W', a: 180 }, { t: '2N', a: 90 },
+  { t: 'NW', a: -135 }, { t: 'N', a: -90 }, { t: 'NE', a: -45 },
+  { t: 'E', a: 0 }, { t: 'SE', a: 45 }, { t: 'S', a: 90 },
+  { t: 'SW', a: 135 }, { t: 'W', a: 180 },
 ]
 const PETALS = [0.95, 0.5, 0.78, 0.86, 0.62, 0.9, 0.55, 0.72]
 // 右侧竖排刻度（原图 1.8/0.6/0.2）
-const RINGS = [1.8, 0.6, 0.2]
+const RINGS = [18, 12, 6]
 
 function Radar() {
   const C = 130, R = 92
@@ -121,7 +121,7 @@ function Radar() {
         {RINGS.map((v, i) => (
           <text key={v} x={C + R + 22} y={C - R + 16 + i * 16}
             fontSize="8.5" fill="#6fa3c4" textAnchor="middle" className="ringlabel">
-            {v.toFixed(1)}
+            {v.toFixed(0)}
           </text>
         ))}
         {RADAR_DIRS.map((d) => {
@@ -147,7 +147,7 @@ function PowerChart() {
   const d = useMemo(() => {
     const W = 292, H = 196, ML = 30, MR = 8, MT = 12, MB = 26
     const xs = (i: number) => ML + (i / 47) * (W - ML - MR)
-    const ys = (v: number) => MT + (1 - v / 1250) * (H - MT - MB)
+    const ys = (v: number) => MT + (1 - v / 50) * (H - MT - MB)
     // 原图形态：白天双峰（08:00 后爬升，12:00 前峰值，14:00 回落，18:00 二峰），夜间低位
     const shape = (t: number) =>
       0.16 + 0.4 * Math.exp(-(((t - 9.2) / 3.2) ** 2)) + 0.52 * Math.exp(-(((t - 19.0) / 2.6) ** 2)) + 0.13 * Math.sin(t * 0.9)
@@ -155,8 +155,8 @@ function PowerChart() {
     const fpts: number[] = []
     for (let i = 0; i < 48; i++) {
       const t = (i / 47) * 24
-      pts.push(ys(Math.max(0, shape(t) * 1080 + 22 * Math.sin(i * 2.7))))
-      fpts.push(ys(Math.max(0, shape(t + 0.35) * 1040)))
+      pts.push(ys(Math.max(0, shape(t) * 42 + 1 * Math.sin(i * 2.7))))
+      fpts.push(ys(Math.max(0, shape(t + 0.35) * 40)))
     }
     const line = (arr: number[]) => arr.map((y, i) => `${i === 0 ? 'M' : 'L'}${xs(i).toFixed(1)},${y.toFixed(1)}`).join(' ')
     const area = `${line(pts)} L${xs(47).toFixed(1)},${ys(0).toFixed(1)} L${xs(0).toFixed(1)},${ys(0).toFixed(1)} Z`
@@ -176,7 +176,7 @@ function PowerChart() {
             <stop offset="1" stopColor="rgba(90,215,255,.02)" />
           </linearGradient>
         </defs>
-        {[0, 300, 600, 900, 1200].map((v) => (
+        {[0, 10, 20, 30, 40, 50].map((v) => (
           <g key={v}>
             <line x1={d.ML} x2={d.W - d.MR} y1={d.ys(v)} y2={d.ys(v)} stroke="rgba(100,175,215,.12)" strokeWidth="0.7" />
             <text x={d.ML - 4} y={d.ys(v) + 3} fontSize="8.5" fill="#5f8db0" textAnchor="end">{v}</text>
@@ -185,7 +185,7 @@ function PowerChart() {
         {[0, 8, 12, 16, 20, 24].map((h) => (
           <text key={h} x={d.ML + (h / 24) * (d.W - d.ML - d.MR)} y={d.H - 9} fontSize="8.5" fill="#5f8db0" textAnchor="middle">{h === 0 ? '0' : `${h}:00`}</text>
         ))}
-        <text x={5} y={d.MT + 26} fontSize="9" fill="#7096b4">Power</text>
+        <text x={5} y={d.MT + 26} fontSize="9" fill="#7096b4">Power (MW)</text>
         <path d={d.area} fill="url(#pgrad)" />
         <path d={d.line(d.pts)} fill="none" stroke="#66dcff" strokeWidth="1.8" className="chart-glow" />
         <path d={d.line(d.fpts)} fill="none" stroke="rgba(190,235,255,.5)" strokeWidth="1.1" strokeDasharray="4 3" />
@@ -202,7 +202,7 @@ function ServoSlider({ i }: { i: number }) {
   const v = servos[i]
   return (
     <div className="srow">
-      <span className="slab">导颈舵机{i + 1}</span>
+      <span className="slab">偏航执行器{i + 1}</span>
       <div className="track">
         <input
           type="range" min={-30} max={30} step={1} value={v}
@@ -344,16 +344,16 @@ export default function Hud() {
           </Panel>
 
           <div className="row2">
-            <Panel title="扬频率" en="(Hz)">
-              <div className="kpi-md">48.20</div>
+            <Panel title="电网频率" en="(Hz)">
+              <div className="kpi-md">50.02</div>
             </Panel>
-            <Panel title="无功平率功率">
+            <Panel title="无功功率" en="(MVar)">
               <div className="kpi-md">19</div>
             </Panel>
           </div>
 
-          <Panel title="运行电机数">
-            <div className="kpi-row"><span className="kpi-xl sm">5</span><span className="unit">台</span></div>
+          <Panel title="运行机组数">
+            <div className="kpi-row"><span className="kpi-xl sm">9</span><span className="unit">台</span></div>
           </Panel>
 
           <Panel title="电网功率" en="(NPI)" tall>
@@ -379,13 +379,13 @@ export default function Hud() {
             <Radar />
           </Panel>
 
-          <Panel title="拉换角度" en="(angle)" tall>
+          <Panel title="偏航角度" en="(deg)" tall>
             <div className="servos">
               {[0, 1, 2, 3, 4].map((i) => <ServoSlider key={i} i={i} />)}
             </div>
           </Panel>
 
-          <Panel title="报警通知讯" tall>
+          <Panel title="报警通知" tall>
             <Alarms />
           </Panel>
         </div>
