@@ -2,8 +2,8 @@ import { create } from 'zustand'
 
 // ================================================================
 // 模拟 SCADA 状态（浏览器内代理演示）
-// 原图口径：全场功率 479,731 MWh / 扬频率 48.20 Hz / 无功平率功率 19 /
-//          运行电机数 5 / NPI 70·99·92% / 导颈舵机1..5 = -10°
+// 演示口径：全场年发电量 318,420 MWh / 电网频率 50.02 Hz / 无功功率 19 MVar /
+//          运行机组数 9 / NPI 70·99·92% / 偏航执行器1..5 = -10°
 // 数值仅作大屏演示；真实值口径见 docs/03（FLORIS 3×3 → +24.04%）
 // ================================================================
 
@@ -16,7 +16,7 @@ export interface AlarmItem {
 }
 
 export interface SimState {
-  // 5 路导颈舵机（原图 yaw=+/-10° 档），对应 turbine/SERVOS 索引
+  // 5 路偏航执行器（原图 yaw=+/-10° 档），对应 turbine/SERVOS 索引
   servos: number[]
   setServo: (i: number, v: number) => void
 
@@ -28,7 +28,7 @@ export interface SimState {
   // 报警流水（分钟前，随时间递增）
   alarms: AlarmItem[]
   setAlarms: (a: AlarmItem[]) => void
-  // 矩阵 2×6 状态位
+  // 矩阵 3×3 状态位
   matrix: boolean[]
   setMatrix: (m: boolean[]) => void
 }
@@ -42,7 +42,7 @@ const ALARM_SEED: AlarmItem[] = [
   { id: 4, kind: 'cyan', zh: '过热预警', en: 'Overheat Alarm', minutes: 22 },
 ]
 
-const MATRIX0: boolean[] = [true, true, false, true, true, false, true, false, true, true, false, true]
+const MATRIX0: boolean[] = [true, true, true, true, true, true, true, true, true]
 
 export const useSim = create<SimState>((set) => ({
   servos: [...M0],

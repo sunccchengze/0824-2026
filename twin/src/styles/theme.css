@@ -149,7 +149,7 @@ button { font-family: inherit; }
 .donut .dl { margin-top: 4px; font-size: 11px; letter-spacing: 0.1em; color: var(--cyan-dim); }
 
 /* ===== 矩阵 ===== */
-.matrix { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; padding: 2px 0; }
+.matrix { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 2px 0; }
 .matrix .m {
   height: 34px; position: relative;
   background: linear-gradient(180deg, rgba(16, 46, 70, 0.75), rgba(6, 22, 36, 0.75));
