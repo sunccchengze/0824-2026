@@ -1,3 +1,4 @@
+/* oxlint-disable react/immutability -- 加载后的纹理配置 mutate 属外部资源初始化（docs/08 D2） */
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useLoader } from '@react-three/fiber'
 import * as THREE from 'three'

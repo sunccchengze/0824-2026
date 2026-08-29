@@ -32,8 +32,8 @@ button { font-family: inherit; }
 /* ===== 舞台：1920×1080 等比缩放 ===== */
 .hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
 .hud .stage {
-  position: absolute; left: 0; top: 0;
-  transform-origin: left top;
+  position: absolute; left: 50%; top: 50%;
+  transform-origin: center center;
   pointer-events: none;
 }
 .hud .stage > * { pointer-events: auto; }
@@ -258,8 +258,174 @@ button { font-family: inherit; }
 
 /* ===== 原图右下角演示标识：不再提供全息/写实模式切换 ===== */
 .demo-note {
-  position: absolute; right: 18px; bottom: 54px;
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 46px;
   font-size: 9px; letter-spacing: 0.18em;
   color: rgba(110, 160, 195, 0.75);
   pointer-events: none;
+}
+
+
+/* ================================================================
+   v3 追加：证据角标 / 顶栏扩展 / 控制控制台 / 矩阵卡 / 信息卡 /
+   告警操作 / 跳过按钮 / 品牌加载与错误屏
+   ================================================================ */
+
+/* 三级证据角标（docs/02 §1.5）：演示=数据皮肤 · 代理=模型推算 · 示意=可视化表达 */
+.evb {
+  display: inline-block; margin-left: 7px; padding: 1px 6px; vertical-align: 2px;
+  font-size: 8.5px; letter-spacing: 0.14em; line-height: 1.5;
+  border: 1px solid rgba(110, 200, 245, 0.45); border-radius: 2px;
+  color: #9fd8f2; background: rgba(10, 34, 52, 0.5);
+}
+.evb-d { border-color: rgba(110, 200, 245, 0.45); }
+.evb-p { border-color: rgba(150, 235, 255, 0.55); color: #c4f1ff; }
+.evb-s { border-color: rgba(90, 150, 190, 0.4); color: #7fa9c4; }
+
+/* 顶栏扩展 */
+.topbar .subtitle {
+  position: absolute; left: 50%; top: 46px; transform: translateX(-50%);
+  font-size: 11px; letter-spacing: 0.4em; text-indent: 0.4em; color: #6f9cbb; white-space: nowrap;
+}
+.topbar .wallclock {
+  position: absolute; left: 396px; top: 24px; font-family: var(--font-mono); font-size: 11.5px;
+  letter-spacing: 0.08em; color: #79a9c8;
+}
+.topbar .quality {
+  position: absolute; right: 400px; top: 20px; display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px; letter-spacing: 0.2em; color: #6f9cbb;
+}
+.topbar .quality button {
+  width: 26px; height: 20px; cursor: pointer; color: #9fd8f2;
+  background: rgba(10, 34, 52, 0.6); border: 1px solid rgba(110, 200, 245, 0.35);
+  font-size: 11px; letter-spacing: 0; transition: all 0.2s;
+}
+.topbar .quality button.on {
+  border-color: rgba(170, 240, 255, 0.9); color: #eafdff;
+  background: rgba(40, 120, 170, 0.45); box-shadow: 0 0 8px rgba(100, 215, 255, 0.4);
+}
+
+/* KPI 副行与警示 */
+.kpi-sub { display: flex; flex-direction: column; gap: 3px; text-align: center; margin-top: 2px; }
+.kpi-sub span { font-size: 10px; letter-spacing: 0.06em; color: #79a9c8; font-family: var(--font-num); }
+.kpi-md.warn { filter: drop-shadow(0 0 10px rgba(255, 95, 107, 0.8)); color: #ffb7bd; }
+.donut .dsl { margin-top: 1px; font-size: 8.5px; color: #5f8db0; letter-spacing: 0.08em; font-family: var(--font-mono); }
+
+/* 矩阵格（可点击机组） */
+.matrix .m {
+  all: unset;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  height: 44px; position: relative; cursor: pointer;
+  background: linear-gradient(180deg, rgba(16, 46, 70, 0.75), rgba(6, 22, 36, 0.75));
+  border: 1px solid rgba(110, 200, 245, 0.28);
+}
+.matrix .m .mid { font-size: 9px; letter-spacing: 0.1em; color: #8fc6e4; font-family: var(--font-mono); }
+.matrix .m .mw { font-size: 10.5px; color: #bdeeff; font-family: var(--font-num); font-weight: 600; }
+.matrix .m .dot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; }
+.matrix .m:hover { border-color: rgba(160, 235, 255, 0.7); }
+.matrix .m.sel { border-color: #c9f2ff; box-shadow: 0 0 10px rgba(120, 225, 255, 0.4), inset 0 0 12px rgba(90, 210, 255, 0.18); }
+.matrix .m.s-alarm { border-color: rgba(255, 95, 107, 0.65); }
+.matrix .m.s-alarm .dot.d-alarm { background: radial-gradient(circle at 35% 30%, #ffd9de, #ff5f6b 55%, #c11f35); box-shadow: 0 0 9px rgba(255, 95, 107, 0.9); animation: blinker 0.9s ease-in-out infinite; }
+.matrix .m.s-curtail { border-color: rgba(61, 90, 116, 0.8); }
+.matrix .m.s-curtail .dot, .matrix .m.s-idle .dot { background: radial-gradient(circle at 35% 30%, #d6e8f4, #3d5a74 60%, #24405a); box-shadow: 0 0 6px rgba(61, 90, 116, 0.6); animation: none; }
+.matrix .m.s-idle { opacity: 0.66; }
+
+/* 控制控制台 */
+.console { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(90, 190, 240, 0.2); }
+.console .slab em { display: inline; margin-left: 6px; font-style: normal; font-size: 10px; color: #9fe6ff; font-family: var(--font-num); }
+.cbtns { display: flex; gap: 8px; margin-top: 9px; }
+.cbtn {
+  flex: 1; padding: 6px 4px; cursor: pointer; font-size: 11px; letter-spacing: 0.1em; color: #c9e9fb;
+  background: rgba(10, 34, 52, 0.65); border: 1px solid rgba(110, 200, 245, 0.4);
+  transition: all 0.2s;
+}
+.cbtn:hover { border-color: rgba(170, 240, 255, 0.85); color: #eafdff; box-shadow: 0 0 10px rgba(100, 215, 255, 0.3); }
+.cbtn.primary { background: linear-gradient(180deg, rgba(40, 130, 180, 0.55), rgba(14, 52, 78, 0.7)); border-color: rgba(150, 235, 255, 0.7); }
+.cbtn .evb { margin-left: 4px; padding: 0 4px; }
+.cnote { margin-top: 8px; font-size: 10.5px; line-height: 1.6; color: #9fd8f2; letter-spacing: 0.04em; padding-left: 8px; border-left: 2px solid rgba(100, 215, 255, 0.5); }
+
+/* 告警条目操作 */
+.ait { grid-template-columns: 16px 1fr auto auto auto; }
+.adot.ok { background: radial-gradient(circle at 35% 30%, #eaffff, #49c9f0 55%, #10749c); box-shadow: 0 0 8px rgba(90, 210, 255, 0.7); animation: mbreathe 3s ease-in-out infinite; }
+.aempty { display: flex; align-items: center; gap: 8px; padding: 10px 2px; font-size: 11px; color: #79a9c8; letter-spacing: 0.06em; }
+.afind, .aack {
+  cursor: pointer; font-size: 10px; letter-spacing: 0.08em; color: #a9ddf5; padding: 2px 7px;
+  background: rgba(10, 34, 52, 0.6); border: 1px solid rgba(110, 200, 245, 0.4); transition: all 0.2s;
+}
+.afind:hover, .aack:hover { color: #eafdff; border-color: rgba(170, 240, 255, 0.8); }
+.ait.lv-crit { background: linear-gradient(90deg, rgba(255, 95, 107, 0.07), transparent 60%); }
+
+/* 雷达读数 */
+.radar-readout { position: absolute; left: 0; right: 0; bottom: 4px; text-align: center; }
+.radar { position: relative; }
+.radar-readout b { display: inline-block; font-family: var(--font-num); font-size: 17px; color: #d7f6ff; letter-spacing: 0.06em; text-shadow: 0 0 10px rgba(90, 200, 255, 0.5); margin-right: 8px; }
+.radar-readout span { font-size: 10px; color: #8fc6e4; letter-spacing: 0.1em; }
+.radar-readout em { display: block; font-style: normal; font-size: 8.5px; color: #5f8db0; letter-spacing: 0.14em; margin-top: 2px; }
+.panel.pw { /* 保留：兼容旧引用 */ }
+
+/* 单机信息卡 */
+.tcard {
+  position: absolute; left: 50%; top: 84px; transform: translateX(-50%);
+  width: 352px; padding: 10px 14px 12px; pointer-events: auto;
+  background: rgba(6, 20, 33, 0.82); border: 1px solid rgba(130, 220, 255, 0.5);
+  box-shadow: 0 0 24px rgba(20, 120, 190, 0.25), inset 0 0 26px rgba(0, 150, 255, 0.08);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+.tcard header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.tcard header b { font-size: 16px; letter-spacing: 0.14em; color: #eafdff; text-shadow: 0 0 10px rgba(90, 200, 255, 0.5); }
+.tcard header span { font-size: 9.5px; color: #79a9c8; letter-spacing: 0.06em; }
+.tcard header button { margin-left: auto; cursor: pointer; width: 20px; height: 20px; color: #9fd8f2; background: none; border: 1px solid rgba(110, 200, 245, 0.4); }
+.tgrid { display: grid; grid-template-columns: 76px 1fr; gap: 4px 10px; font-size: 11.5px; }
+.tgrid label { color: #6f9cbb; letter-spacing: 0.12em; }
+.tgrid span { color: #d7f6ff; font-family: var(--font-num); font-size: 12px; letter-spacing: 0.02em; }
+.tgrid .st { font-style: normal; font-family: var(--font-cn); letter-spacing: 0.2em; }
+.tgrid .s-run { color: #9ff0d8; }
+.tgrid .s-alarm { color: #ff8791; }
+.tgrid .s-curtail { color: #9fc0d8; }
+.tgrid .s-idle { color: #6f9cbb; }
+
+/* 跳过开场 */
+.skip-btn {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 78px; pointer-events: auto; cursor: pointer;
+  padding: 6px 14px; font-size: 11px; letter-spacing: 0.2em; color: #c9e9fb;
+  background: rgba(6, 20, 33, 0.7); border: 1px solid rgba(130, 220, 255, 0.5);
+  animation: skipPulse 2.4s ease-in-out infinite;
+}
+.skip-btn:hover { color: #eafdff; border-color: #bdf0ff; }
+.skip-btn kbd { margin-left: 6px; font-family: var(--font-mono); font-size: 9px; opacity: 0.7; }
+@keyframes skipPulse { 50% { box-shadow: 0 0 14px rgba(100, 215, 255, 0.35); } }
+
+/* 全屏按钮（替代原装饰音量钮，D12） */
+.fbtn { cursor: pointer; width: 24px; height: 20px; font-size: 13px; line-height: 1; color: #9fd8f2; background: none; border: 1px solid rgba(110, 200, 245, 0.35); }
+.fbtn:hover { color: #eafdff; border-color: rgba(170, 240, 255, 0.8); }
+
+/* 品牌加载屏 / 错误屏 */
+.splash, .fatal-screen {
+  position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; flex-direction: column;
+  background: radial-gradient(120% 90% at 50% 30%, #071a2b 0%, #03080f 60%, #010407 100%);
+  color: #d7f6ff; transition: opacity 0.6s; text-align: center;
+}
+.splash-logo { font-family: var(--font-num); font-weight: 700; font-size: 40px; letter-spacing: 0.5em; text-indent: 0.5em; color: #eafdff; text-shadow: 0 0 24px rgba(90, 210, 255, 0.6); }
+.splash-sub { margin-top: 10px; font-size: 13px; letter-spacing: 0.44em; text-indent: 0.44em; color: #6f9cbb; }
+.splash-bar { width: 280px; height: 2px; margin-top: 26px; background: rgba(60, 130, 175, 0.3); overflow: hidden; }
+.splash-bar i { display: block; height: 100%; width: 40%; background: linear-gradient(90deg, transparent, #66dcff, transparent); animation: splashRun 1.2s linear infinite; }
+@keyframes splashRun { from { transform: translateX(-100%); } to { transform: translateX(320%); } }
+.splash em { margin-top: 16px; font-style: normal; font-size: 10px; letter-spacing: 0.2em; color: #45657d; }
+.fatal-screen { z-index: 60; }
+.fatal-card { padding: 28px 36px; border: 1px solid rgba(255, 95, 107, 0.5); background: rgba(20, 8, 14, 0.7); max-width: 560px; }
+.fatal-card h2 { margin: 0 0 10px; font-size: 16px; letter-spacing: 0.3em; color: #ffb7bd; }
+.fatal-card p { font-size: 12px; color: #c9d8e2; line-height: 1.7; word-break: break-all; }
+.fatal-card button { margin-top: 14px; cursor: pointer; padding: 7px 18px; font-size: 12px; letter-spacing: 0.2em; color: #eafdff; background: rgba(120, 30, 45, 0.5); border: 1px solid rgba(255, 95, 107, 0.6); }
+.fatal-card em { display: block; margin-top: 12px; font-style: normal; font-size: 9.5px; color: #6f8698; letter-spacing: 0.1em; }
+.canvas-wrap { position: fixed; inset: 0; z-index: 1; }
+
+/* ---- 窄竖屏适配（D6/C8）：舞台整体缩放安全呈现 + 横屏提示 ---- */
+@media (orientation: portrait) and (max-width: 760px) {
+  body { background: radial-gradient(120% 90% at 50% 30%, #06141f 0%, #020810 70%, #01050a 100%); }
+  body::after {
+    content: '建议 1920×1080 横屏查看完整控制台';
+    position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%);
+    z-index: 40; pointer-events: none; white-space: nowrap;
+    font-size: 11px; letter-spacing: 0.22em; color: rgba(140, 200, 235, 0.8);
+    padding: 4px 12px; border: 1px solid rgba(110, 200, 245, 0.25); background: rgba(4, 14, 24, 0.72);
+  }
 }

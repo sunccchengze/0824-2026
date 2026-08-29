@@ -1,3 +1,4 @@
+/* oxlint-disable react/immutability -- 对 three scene/pmrem 的外部系统同步（docs/08 D2） */
 import { useEffect } from 'react'
 import { useThree } from '@react-three/fiber'
 import * as THREE from 'three'

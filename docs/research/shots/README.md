@@ -11,3 +11,14 @@
 - `r17_no_bloom_white_edges.png`：R17，关闭 Bloom 后的开场帧，用于验证天空下半球无指数溢出白团、风机轮廓保持纯白。
 
 截图脚本在沙箱中使用 SwiftShader；其边缘颗粒属于软件渲染伪影，真机 GPU 预览会更干净。
+
+## v3 交付轮证据（2026-08-28，`?debug=1` 固定机位 + `&t=` 时刻锁定，可复现）
+- `after_hero_1920.png`：P0 后基线，1920×1080，`?t=10.2&cam=0,22,990,0,22,-340`。对应"前"图：`w1_south_hero.png`。
+- `after_az92_east.png` / `after_az272_west.png` / `after_az182_north.png`：三方位视角巡检（白线均亮 210–218，无变暗；docs/08 §〇）。
+- `after_rotor_upwind_closeup.png` / `after_rotor_downwind_closeup.png`：A4 转子迎风近距对拍（北侧见叶盘正面，南侧见机舱尾锥）。
+- `after_optimize.png`：E3/E6 联动闭环实拍——一键寻优后 5 路滑杆停在 −1.5…−33°、告警卡（偏航偏差超限·可定位）、功率 4.82→6.00MW（+24.3%）、wake 40.9→26.5%。
+- `after_curtail_12mw.png`：研究内容③闭环——指令 12MW → total=12.00MW、9 机 curtail、DERATE 告警。
+- `after_wake_veil_on.png` / `after_wake_veil_off.png`：同 t 同相位真 A/B（abdiff：31,457 显著像素，集中于轮毂高走廊与尾流羽带；粒子亮度 P50=122/P90=243）。
+- `after_hero_noveil.png`：hero 机位关纱对照。
+- `after_narrow_1280.png` / `after_mobile_390.png`：窄屏/竖屏适配（等比居中+竖屏提示条，无溢出）。
+注：SwiftShader 软渲染边缘颗粒为沙箱伪影；真机 GPU 更干净。旧 `w*/r*` 图仍为各轮历史基线，未删除。
