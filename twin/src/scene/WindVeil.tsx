@@ -1,23 +1,27 @@
-import { useMemo, useRef, useEffect } from 'react'
+import { useMemo, useEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { FARM, terrainHeight } from './terrainUtil'
+import { rng } from '../state/simCore'
 
-// ===========================================================================
-// W6 风况粒子（v2 · 语义修正）
+// ============================================================================
+// W6 风况粒子（v3 · 风向语义最终版）
 // ---------------------------------------------------------------------------
-// 旧版问题：三条"银河弧带"沿 x 向横穿第二排风机、贴地仅 10~60m——看起来像一股
-// 方向错误的风；且材质开着深度测试，被山体一挡"换个角度就消失"。
+// 全场风向唯一语义：主导风向 = 南 → 北（微偏东），与机组迎风方向一致——
+// NREL 5MW 是上风向机组，转子迎风；9 台转子平面朝 +z（南），即迎风面，
+// 与本层粒子来向（+z 起点 → -z 终点）物理自洽（A4 终裁；用户原图.rotor
+// 面向观众的正脸构图保持不变）。
+//   ① 高空来流 —— 南侧高空(y 560~850)沿同一风向北上，越过阵列后升入北岭；
+//      距离远、亮度低，只做纵深氛围。
+//   ② 列向来流 —— 近场 11 条流线自南向北依次穿过近/中/远三排（尾流叙事）。
 //
-// 现在全场风只有一种语义：主导风向 = 北 → 南（微偏东），与机组【列向】一致：
-//   ① 远脊来流 —— 北岭后高空(y 500~820)沿同一风向南下，透视收缩成一束束从
-//      山脊后涌来的微光；距离远、亮度低，只做纵深氛围，不与机组争抢。
-//   ② 列向来流 —— 近场 11 条流线沿 z 向依次穿过远/中/近三排（尾流叙事），
-//      途经机组轻微绕流。
-//
-// 材质遵循全息层统一规则：depthTest:false / depthWrite:false / fog:false /
-// toneMapped:false + AdditiveBlending —— 任意视角、任意山体遮挡下亮度恒定。
-// ===========================================================================
+// 工程修正：
+//   · D3：采样 LUT 化——初始化时一次性弧长烘焙 256 点，逐帧只做查表+插值，
+//     不再每帧 2564 次 getPointCatmullRom；
+//   · 全层 depthTest:true（C1）：粒子被山体正确遮挡；材质仍
+//     toneMapped:false / fog:false / additive，亮度依旧视角无关；
+//   · 粒子排布改为确定性随机源（可复现）。
+// ============================================================================
 
 const VERT = /* glsl */ `
 attribute float aSize;
@@ -54,38 +58,39 @@ interface Stream {
   wig: number // CPU 抖动幅度（远处的流更"粗"，抖动也更大）
 }
 
-// 调试开关：?noveil=1 时整个风况粒子层不渲染（截图对比/粒子归属定位用）
-const NOVEIL = typeof location !== 'undefined' && new URLSearchParams(location.search).has('noveil')
+// 调试开关（仅开发环境）：?noveil=1 时整个风况粒子层不渲染（A/B 归属定位用）
+const NOVEIL = import.meta.env.DEV && new URLSearchParams(location.search).has('noveil')
+
+const LUT_N = 256
 
 export default function WindVeil() {
-  const matRef = useRef<THREE.ShaderMaterial>(null!)
   const built = useMemo(() => {
     const streams: Stream[] = []
+    const rand = rng(20260828)
 
-    // ① 远脊来流：北岭后高空，沿主导风向（北→南、微偏东）南下。
-    //    透视上收缩为山脊后涌出的细碎光带，与 ② 的近场流线首尾呼应。
+    // ① 南侧高空来流：沿主导风向（南→北、微偏东）越过全场，升入北岭。
     for (let k = 0; k < 6; k++) {
       const pts: THREE.Vector3[] = []
       const n = 8
       const x0 = -1520 + k * 600 + Math.sin(k * 2.7) * 90
       for (let i = 0; i < n; i++) {
         const t = i / (n - 1)
-        const z = -3380 + t * 1620 // -3380 → -1760，止于远排之后
+        const z = 1400 - t * 4300 // z: +1400（南侧远方） → -2900（北岭之上）
         const x = x0 + t * 280 + Math.sin(t * 3.0 + k * 1.3) * 90
-        const y = 700 - t * 180 + Math.sin(t * Math.PI) * 55 + k * 26
+        const y = 560 + t * 250 + Math.sin(t * Math.PI) * 70 + k * 22
         pts.push(new THREE.Vector3(x, y, z))
       }
       streams.push({ curve: curveFrom(pts), count: 300, speed: 0.028, size: 11, bright: 0.5, wig: 13 })
     }
 
-    // ② 列向来流：北 → 南南东，沿机组列向穿过三排（呼应偏航尾流叙事）
+    // ② 列向来流：南 → 北（偏东），沿机组列向由近排向远排穿过（上风向下游）
     const laneXs = [-640, -480, -330, -190, -60, 70, 200, 330, 470, 610, 750]
     laneXs.forEach((lx, li) => {
       const pts: THREE.Vector3[] = []
       const n = 8
       for (let i = 0; i < n; i++) {
         const t = i / (n - 1)
-        const z = -1500 + t * 2100
+        const z = 1500 - t * 3000 // z: +1500 → -1500（自南向北纵贯阵列）
         let x = lx + t * 300 + Math.sin(t * 4.4 + li) * 46
         // 途经机组时轻微绕流（示意偏航导流的视觉联想）
         for (const u of FARM) {
@@ -107,16 +112,22 @@ export default function WindVeil() {
     let o = 0
     for (const st of streams) {
       for (let j = 0; j < st.count; j++) {
-        seeds[o * 2] = Math.random()
-        seeds[o * 2 + 1] = Math.random() * Math.PI * 2
-        aSize[o] = st.size * (0.45 + Math.random() * 1.55)
-        aBright[o] = st.bright * (0.35 + Math.random() * 0.65)
+        seeds[o * 2] = rand()
+        seeds[o * 2 + 1] = rand() * Math.PI * 2
+        aSize[o] = st.size * (0.45 + rand() * 1.55)
+        aBright[o] = st.bright * (0.35 + rand() * 0.65)
         o++
       }
     }
-    const curves = streams.map((s) => ({
-      curve: s.curve, count: s.count, speed: s.speed, wig: s.wig,
-    }))
+    // D3：弧长 LUT 一次性烘焙（getPointAt 仅在初始化用）
+    const luts = streams.map((s) => {
+      const arr = new Float32Array(LUT_N * 3)
+      for (let i = 0; i < LUT_N; i++) {
+        const p = s.curve.getPointAt(i / (LUT_N - 1))
+        arr[i * 3] = p.x; arr[i * 3 + 1] = p.y; arr[i * 3 + 2] = p.z
+      }
+      return { lut: arr, count: s.count, speed: s.speed, wig: s.wig }
+    })
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
     g.setAttribute('aSize', new THREE.BufferAttribute(aSize, 1))
@@ -124,15 +135,14 @@ export default function WindVeil() {
     const m = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
       uniforms: { uColor: { value: new THREE.Color('#7fd2f2') } },
-      transparent: true, depthWrite: false, depthTest: false,
+      transparent: true, depthWrite: false, depthTest: true,
       fog: false, toneMapped: false,
       blending: THREE.AdditiveBlending,
     })
-    matRef.current = m
     const p = new THREE.Points(g, m)
     p.frustumCulled = false
     p.renderOrder = 2
-    return { points: p, curves, seeds }
+    return { points: p, luts, seeds }
   }, [])
 
   useEffect(() => () => {
@@ -140,20 +150,26 @@ export default function WindVeil() {
     ;(built.points.material as THREE.Material).dispose()
   }, [built])
 
-  const tmp = useMemo(() => new THREE.Vector3(), [])
   useFrame((s) => {
     const t = s.clock.elapsedTime
     const posAttr = built.points.geometry.attributes.position as THREE.BufferAttribute
     const arr = posAttr.array as Float32Array
     let o = 0
-    for (const c of built.curves) {
+    for (const c of built.luts) {
+      const lut = c.lut
       for (let j = 0; j < c.count; j++, o++) {
         const tt = (built.seeds[o * 2] + t * c.speed) % 1
-        c.curve.getPoint(tt, tmp)
+        const fi = tt * (LUT_N - 1)
+        const i0 = Math.floor(fi)
+        const i1 = Math.min(LUT_N - 1, i0 + 1)
+        const f = fi - i0
+        const bx = lut[i0 * 3] + (lut[i1 * 3] - lut[i0 * 3]) * f
+        const by = lut[i0 * 3 + 1] + (lut[i1 * 3 + 1] - lut[i0 * 3 + 1]) * f
+        const bz = lut[i0 * 3 + 2] + (lut[i1 * 3 + 2] - lut[i0 * 3 + 2]) * f
         const ph = built.seeds[o * 2 + 1]
-        arr[o * 3] = tmp.x + Math.sin(t * 1.3 + ph) * c.wig
-        arr[o * 3 + 1] = tmp.y + Math.sin(t * 1.7 + ph * 2.0) * (c.wig * 0.7)
-        arr[o * 3 + 2] = tmp.z + Math.cos(t * 1.1 + ph) * c.wig
+        arr[o * 3] = bx + Math.sin(t * 1.3 + ph) * c.wig
+        arr[o * 3 + 1] = by + Math.sin(t * 1.7 + ph * 2.0) * (c.wig * 0.7)
+        arr[o * 3 + 2] = bz + Math.cos(t * 1.1 + ph) * c.wig
       }
     }
     posAttr.needsUpdate = true

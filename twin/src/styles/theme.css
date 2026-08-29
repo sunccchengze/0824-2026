@@ -21,22 +21,28 @@
   --alarm: #ff5566;
   --txt: #dff4ff;
   --font-cn: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
-  --font-num: 'Rajdhani', 'Orbitron', 'DIN Alternate', 'Bahnschrift', system-ui, sans-serif;
-  --font-mono: 'Share Tech Mono', 'Rajdhani', monospace;
+  /* 数字字体链必须带 CJK 兜底：纯西文字体遇中文副标会退化成豆腐块（无系统字体的环境实测） */
+  --font-num: 'Rajdhani', 'Orbitron', 'DIN Alternate', 'Bahnschrift', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'Share Tech Mono', 'Rajdhani', 'Noto Sans SC', monospace;
 }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; background: var(--bg); font-family: var(--font-cn); }
 button { font-family: inherit; }
 
-/* ===== 舞台：1920×1080 等比缩放 ===== */
+/* ===== 舞台：1920×1080 等比缩放（C8：居中缩放，非 16:9 不再贴左上角） ===== */
 .hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
 .hud .stage {
-  position: absolute; left: 0; top: 0;
-  transform-origin: left top;
+  position: absolute; left: 50%; top: 50%;
+  transform-origin: center center;
   pointer-events: none;
 }
 .hud .stage > * { pointer-events: auto; }
+
+/* 数字统一 tabular-nums（C10 数字字体规范） */
+.kpi-xl, .kpi-md, .kpi-row, .sval, .clock, .donut-num, .atime, .subkpi, .rwind-v {
+  font-variant-numeric: tabular-nums;
+}
 
 /* ===== 顶部通栏 ===== */
 .topbar { position: absolute; left: 0; top: 0; width: 1920px; height: 66px; }
@@ -256,10 +262,111 @@ button { font-family: inherit; }
 .wcall.r .wline { background: linear-gradient(270deg, rgba(140, 230, 255, 0.95), rgba(140, 230, 255, 0.25)); }
 .wcall.r .wtext { margin: 0 7px 0 0; text-align: right; }
 
-/* ===== 原图右下角演示标识：不再提供全息/写实模式切换 ===== */
-.demo-note {
-  position: absolute; right: 18px; bottom: 54px;
-  font-size: 9px; letter-spacing: 0.18em;
-  color: rgba(110, 160, 195, 0.75);
+/* ===== 时间轴内演示标识 ===== */
+.tl-demo {
+  flex: none; font-size: 9px; letter-spacing: 0.14em;
+  color: rgba(110, 160, 195, 0.8); white-space: nowrap;
+}
+
+/* ===== 全场功率大数字下的副指标 ===== */
+.subkpi {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: 2px 4px 0;
+  font-family: var(--font-num); font-size: 10.5px; letter-spacing: 0.05em;
+  color: rgba(140, 190, 220, 0.85);
+}
+
+/* ===== 目标功率 + 偏航自优 ===== */
+.target-zone { margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(90, 190, 240, 0.22); }
+.trow { display: grid; grid-template-columns: 84px 1fr 38px; align-items: center; gap: 10px; }
+.auto-line { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
+.auto-btn {
+  flex: none; padding: 4px 12px; font-size: 11px; letter-spacing: 0.1em; cursor: pointer;
+  color: #bfeaff; background: rgba(10, 30, 45, 0.7);
+  border: 1px solid rgba(120, 210, 250, 0.45); border-radius: 2px;
+  transition: all .18s ease;
+}
+.auto-btn:hover { background: rgba(40, 110, 150, 0.5); }
+.auto-btn.on {
+  color: #032030; background: linear-gradient(90deg, #66dcff, #a9ecff);
+  border-color: rgba(190, 240, 255, 0.9);
+  box-shadow: 0 0 12px rgba(100, 215, 255, 0.55);
+}
+.track-note { font-size: 10px; letter-spacing: 0.05em; color: rgba(150, 210, 240, 0.9); white-space: nowrap; }
+.track-note.dim { color: rgba(110, 160, 190, 0.7); }
+.srow.auto .trk::after { content: 'AUTO'; position: absolute; right: -2px; top: -14px; font-size: 7px; letter-spacing: 0.15em; color: rgba(120, 200, 240, 0.6); }
+.srow.auto { opacity: 0.85; }
+
+/* ===== 报警确认态 ===== */
+.ait { cursor: pointer; }
+.ait.acked { opacity: 0.42; }
+.ait.acked .adot { animation: none; }
+
+/* ===== 矩阵单元机组号 ===== */
+.matrix .m { gap: 5px; }
+.matrix .mid { font-size: 7.5px; letter-spacing: 0.05em; color: rgba(120, 175, 205, 0.7); }
+.matrix .m.on .mid { color: rgba(160, 220, 250, 0.9); }
+.matrix .dot.bad {
+  background: radial-gradient(circle at 35% 30%, #ffe3e6, #ff5f6b 45%, #c11f35 100%);
+  box-shadow: 0 0 9px rgba(255, 90, 110, 0.9);
+}
+
+/* ===== 雷达中心实时风速 ===== */
+.rwind-v { font-family: var(--font-num); font-weight: 700; font-size: 22px; fill: #dff6ff; }
+.rwind-l { font-size: 8px; fill: #6fa3c4; letter-spacing: 0.08em; }
+.rwind-l.dim { fill: #4d7592; }
+
+/* ===== 开场跳过提示 ===== */
+.skip-hint {
+  position: absolute; left: 50%; bottom: 62px; transform: translateX(-50%);
+  padding: 6px 18px; font-size: 11px; letter-spacing: 0.22em;
+  color: rgba(200, 240, 255, 0.85);
+  background: rgba(8, 24, 38, 0.55); border: 1px solid rgba(110, 215, 255, 0.3);
+  border-radius: 2px; backdrop-filter: blur(6px);
+  animation: skipPulse 2.4s ease-in-out infinite;
   pointer-events: none;
+}
+@keyframes skipPulse { 50% { opacity: 0.55; } }
+
+/* ===== 回放按钮 ===== */
+.replay {
+  flex: none; padding: 3px 10px; font-size: 10px; letter-spacing: 0.12em; cursor: pointer;
+  color: rgba(190, 235, 255, 0.9); background: rgba(10, 30, 45, 0.6);
+  border: 1px solid rgba(120, 210, 250, 0.4); border-radius: 2px;
+}
+.replay:hover { background: rgba(40, 110, 150, 0.5); box-shadow: 0 0 8px rgba(90, 210, 255, 0.35); }
+
+/* ===== 加载幕布 ===== */
+.boot-veil {
+  position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(120% 90% at 50% 30%, #071624 0%, #03080f 62%, #01040a 100%);
+  transition: opacity .5s ease; opacity: 1;
+}
+.boot-veil.fade { opacity: 0; pointer-events: none; }
+.boot-inner { text-align: center; }
+.boot-logo {
+  font-family: var(--font-num); font-weight: 700; font-size: 44px; letter-spacing: 0.5em; text-indent: 0.5em;
+  color: #eafcff; text-shadow: 0 0 24px rgba(90, 210, 255, 0.6);
+}
+.boot-sub { margin-top: 10px; font-size: 12px; letter-spacing: 0.3em; color: rgba(140, 200, 235, 0.8); }
+.boot-bar { margin: 22px auto 0; width: 220px; height: 2px; background: rgba(90, 180, 230, 0.18); overflow: hidden; position: relative; }
+.boot-bar i { position: absolute; left: -40%; top: 0; width: 40%; height: 100%; background: linear-gradient(90deg, transparent, #66dcff, transparent); animation: bootscan 1.4s linear infinite; }
+@keyframes bootscan { to { left: 100%; } }
+
+/* ===== 致命错误兜底 ===== */
+.fatal {
+  position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+  background: rgba(2, 8, 15, 0.92);
+}
+.fatal-card {
+  max-width: 520px; padding: 30px 36px; text-align: center;
+  background: rgba(9, 28, 44, 0.8); border: 1px solid rgba(110, 215, 255, 0.4);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+.fatal-card h2 { margin: 0 0 10px; font-size: 18px; letter-spacing: 0.2em; color: #eafcff; }
+.fatal-card p { margin: 0 0 12px; font-size: 12px; color: rgba(150, 200, 230, 0.85); }
+.fatal-card code { display: block; margin: 0 0 16px; font-size: 10px; color: rgba(255, 130, 140, 0.8); word-break: break-all; }
+.fatal-card button {
+  padding: 8px 26px; font-size: 13px; letter-spacing: 0.2em; cursor: pointer;
+  color: #032030; background: linear-gradient(90deg, #66dcff, #a9ecff); border: 0;
 }

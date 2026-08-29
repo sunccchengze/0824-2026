@@ -69,6 +69,8 @@ export function terrainHeight(x: number, z: number): number {
 }
 
 // ---- 场区：3×3 排布（舵机 1-5 与显眼机组编排见 SERVOS）----
+// 注：列距 ≈410m ≈ 3.3D、行距 440m ≈ 3.5D，比真实尾流工程惯例（5-8D）更紧，
+// 是 3×3 大屏构图的视觉取舍（docs/08 已登记为叙事风险，不伪称真实尾流优化）。
 export interface FarmUnit { id: string; x: number; z: number; row: number; col: number; speed: number }
 export const FARM: FarmUnit[] = (() => {
   const arr: FarmUnit[] = []
@@ -109,13 +111,28 @@ export const CAM = {
   fov: 47,
 }
 
-// ---- 世界标注锚点（引线标签用）----
+// ---- 串接集电拓扑（A8 修正：每列一串 远→中→近→升压站，取代 9 条放射直连）----
+// 视觉上仍保留“全场能量汇入升压站”的冰河叙事，工程口径变为 3 回集电线路。
+export const COLLECTOR_CHAINS: number[][] = [0, 1, 2].map((c) => [c, c + 3, c + 6]) // FARM 索引：远→中→近
+
+// ---- 世界标注锚点（引线标签用；全部锚定真实结构物/流场，不再悬空）----
+const HUB_H = 90
 export const ANCHOR = {
-  power: { x: -520, y: terrainHeight(-520, -1080) + 240, z: -1080 },
-  wake: { x: 480, y: terrainHeight(480, -640) + 210, z: -640 },
-  turbine: { x: -520, y: terrainHeight(-520, -200) + 120, z: -200 },
-  cable: { x: -280, y: terrainHeight(-280, 90) + 12, z: 90 },
-  substation: { x: SUBSTATION.x - 150, y: terrainHeight(SUBSTATION.x - 150, SUBSTATION.z - 120) + 130, z: SUBSTATION.z - 120 },
+  // 全场功率总览 → 指向远排中机组 T02（代表阵列整体）
+  power: { x: FARM[1].x, y: terrainHeight(FARM[1].x, FARM[1].z) + HUB_H + 14, z: FARM[1].z },
+  // 风能资源场 → 阵列近排来风上游上空（主导风向 南→北 的来流一侧，轮毂高度）
+  wake: { x: 60, y: terrainHeight(60, 120) + HUB_H + 6, z: 120 },
+  // 风机 → 近排左机组 T07 轮毂
+  turbine: { x: FARM[6].x, y: terrainHeight(FARM[6].x, FARM[6].z) + HUB_H - 2, z: FARM[6].z },
+  // 集电线路 → 近排右机组→升压站主干线 55% 处（贴地 +3.5m，不悬空）
+  cable: (() => {
+    const t = 0.55
+    const x = FARM[8].x + (SUBSTATION.x - FARM[8].x) * t
+    const z = FARM[8].z + (SUBSTATION.z - FARM[8].z) * t
+    return { x, y: terrainHeight(x, z) + 3.5, z }
+  })(),
+  // 升压站 → 屋顶 (30m 主体 + 基座)
+  substation: { x: SUBSTATION.x - 40, y: terrainHeight(SUBSTATION.x, SUBSTATION.z) + 36, z: SUBSTATION.z - 10 },
   // 圈选：左下近景大机组（FARM[6] 附近）
   dot: { x: -610, y: terrainHeight(-610, -160) + 60, z: -160 },
 }

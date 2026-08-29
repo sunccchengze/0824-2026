@@ -1,51 +1,36 @@
 import { create } from 'zustand'
 
 // ================================================================
-// 模拟 SCADA 状态（浏览器内代理演示）
-// 演示口径：全场年发电量 318,420 MWh / 电网频率 50.02 Hz / 无功功率 19 MVar /
-//          运行机组数 9 / NPI 70·99·92% / 偏航执行器1..5 = -10°
-// 数值仅作大屏演示；真实值口径见 docs/03（FLORIS 3×3 → +24.04%）
+// 演示状态总线（单一数据契约）
+// HUD、3D 场景、告警、矩阵、曲线全部从这里取数；派生物理量在
+// state/simCore.ts（确定性演示代理）里统一求解，禁止组件各自硬编码。
 // ================================================================
 
-export interface AlarmItem {
-  id: number
-  kind: 'red' | 'cyan'
-  zh: string
-  en: string
-  minutes: number
-}
-
 export interface SimState {
-  // 5 路偏航执行器（原图 yaw=+/-10° 档），对应 turbine/SERVOS 索引
+  // 5 路偏航执行器（手动模式值；AUTO 时面板显示 simCore 求解输出）
   servos: number[]
   setServo: (i: number, v: number) => void
 
-  // 时间轴（24h 巡航）
+  // 偏航自优（目标功率 → 各机偏航角，申请书研究内容③的演示口径）
+  auto: boolean
+  targetMW: number
+  setAuto: (b: boolean) => void
+  setTargetMW: (v: number) => void
+
+  // 时间轴（24h 巡航，50 分钟一昼夜）
   tHours: number
   playing: boolean
   togglePlay: () => void
 
-  // 报警流水（分钟前，随时间递增）
-  alarms: AlarmItem[]
-  setAlarms: (a: AlarmItem[]) => void
-  // 矩阵 3×3 状态位
-  matrix: boolean[]
-  setMatrix: (m: boolean[]) => void
+  // 开场运镜状态（可跳过/可回放）
+  introActive: boolean
+  setIntroActive: (b: boolean) => void
 }
 
-const M0: number[] = [-10, -10, -10, -10, -10]
-const ALARM_SEED: AlarmItem[] = [
-  { id: 0, kind: 'red', zh: '过热预警', en: 'Overheat Alarm', minutes: 23 },
-  { id: 1, kind: 'cyan', zh: '过热预警', en: 'Overheat Alarm', minutes: 22 },
-  { id: 2, kind: 'red', zh: '过热预警', en: 'Overheat Alarm', minutes: 22 },
-  { id: 3, kind: 'red', zh: '过热预警', en: 'Overheat Alarm', minutes: 23 },
-  { id: 4, kind: 'cyan', zh: '过热预警', en: 'Overheat Alarm', minutes: 22 },
-]
-
-const MATRIX0: boolean[] = [true, true, true, true, true, true, true, true, true]
+const SERVO_INIT: number[] = [-10, -10, -10, -10, -10] // 原图初值口径
 
 export const useSim = create<SimState>((set) => ({
-  servos: [...M0],
+  servos: [...SERVO_INIT],
   setServo: (i, v) =>
     set((s) => {
       const servos = [...s.servos]
@@ -53,15 +38,18 @@ export const useSim = create<SimState>((set) => ({
       return { servos }
     }),
 
+  auto: true,
+  targetMW: 34,
+  setAuto: (b) => set({ auto: b }),
+  setTargetMW: (v) => set({ targetMW: v }),
+
   tHours: 10,
   playing: true,
   togglePlay: () => set((s) => ({ playing: !s.playing })),
 
-  alarms: [...ALARM_SEED],
-  setAlarms: (a) => set({ alarms: a }),
-  matrix: [...MATRIX0],
-  setMatrix: (m) => set({ matrix: m }),
+  introActive: true,
+  setIntroActive: (b) => set({ introActive: b }),
 }))
 
-/** 舵机 → 机组索引映射：5 路对应画面中最显著的 5 台（见 terrainUtil.FARM） */
-export const SERVO_TID = [0, 1, 4, 6, 8] as const
+// 说明：旧的矩阵/报警假数据与 simStore.SERVO_TID 双映射均已删除（D7）。
+// 机组唯一映射：terrainUtil.SERVOS（5 路执行器 → 机组索引）。

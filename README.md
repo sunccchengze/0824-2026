@@ -19,5 +19,5 @@
 - wrangler 4.125.0 可用；npm 核验：n8ao 2.0.1、@takram/three-atmosphere 0.19.1、@gltf-transform/cli 4.4.2、camera-controls 3.1.2、echarts 6.1.0、uplot 1.6.32、maath 0.10.8、gsap 3.15.0
 - Cloudflare Pages 硬约束登记：单文件 ≤25MiB、20,000 文件、带宽免费；Workers Static Assets 为官方新推荐（迁移零成本预留）
 
-## 🚦 当前状态
-方案冻结，等待 Phase 1 开工指令（见 02 文档 §7）。
+## 🚦 当前状态（2026-08-28）
+`arena/01a0489b-0824-2026` 分支：`twin/` 大屏已完成 docs/07 全清单闭环（P0 实证修复＋P1 处理＋画面可见 P2 清零），构建/lint/截图/运行时探针证据齐备。交付口径见 [docs/08_合并评审_最终清单.md](docs/08_合并评审_最终清单.md)，before/after 对照图在 `docs/research/shots/final/`。
