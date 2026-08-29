@@ -3,8 +3,9 @@ import { ANCHOR } from './terrainUtil'
 
 // ================================================================
 // 世界标注（DOM 引线标签）
-// 文案 = 用户原图原文（像素级还原口径）
-// 每个锚点按语义放置，标签与设备保持可读间距。
+// 文案 = 订正后的工程真值（A1/A6：不再抄写原图乱码、不再使用
+// 「Total Power Pool / Cable Landing」等误用术语）；
+// 锚点 = 真实结构物/流场位置（terrainUtil.ANCHOR，全部贴附对象不悬空）。
 // ================================================================
 const ITEMS: {
   at: { x: number; y: number; z: number }
@@ -13,11 +14,11 @@ const ITEMS: {
   en: string
   line?: number
 }[] = [
-  { at: ANCHOR.power,      side: 'r', zh: '全场功率总览', en: 'Total Power Pool',        line: 58 },
-  { at: ANCHOR.wake,       side: 'l', zh: '风能资源场',   en: 'Wind speed',               line: 46 },
-  { at: ANCHOR.turbine,    side: 'r', zh: '风机',     en: 'Turbine Group',            line: 42 },
-  { at: ANCHOR.cable,      side: 'r', zh: '集电线路',     en: 'Electrical Cable Landing', line: 40 },
-  { at: ANCHOR.substation, side: 'l', zh: '升压站',     en: 'Substation',               line: 48 },
+  { at: ANCHOR.power,      side: 'r', zh: '全场功率总览', en: 'Farm Total Power',   line: 58 },
+  { at: ANCHOR.wake,       side: 'l', zh: '风能资源场',   en: 'Wind Resource',      line: 46 },
+  { at: ANCHOR.turbine,    side: 'r', zh: '风机',         en: 'NREL 5MW Turbine',   line: 42 },
+  { at: ANCHOR.cable,      side: 'r', zh: '集电线路',     en: 'Collector Cables',   line: 40 },
+  { at: ANCHOR.substation, side: 'l', zh: '升压站',       en: 'Substation 220kV',   line: 48 },
 ]
 
 export default function Callouts() {

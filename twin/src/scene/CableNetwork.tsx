@@ -1,24 +1,32 @@
-import { useMemo, useRef, useEffect } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
-import { APPROACH, FARM, SUBSTATION, terrainHeight } from './terrainUtil'
+import { APPROACH, COLLECTOR_CHAINS, FARM, SUBSTATION, terrainHeight } from './terrainUtil'
+import { registerLineRes } from './turbine/holoParts'
+import { rng } from '../state/simCore'
 
 // ============================================================================
-// 冰河集电网络 —— 纤细线芯 + 流动粒子
+// 冰河集电网络 —— 串接集电拓扑（A8 工程修正版）
 //
-// 设计：
-//   · 只有两层线：极细的冷白芯 + 更细的微光边（柔和锯齿），没有粗辉光；
-//   · 没有三股绞线、没有河床条带（那是让它像灯管的元凶）；
-//   · 外送线从 5 根扇骨收成 2 根，避免远看变成一排灯管；
-//   · 亮度交给流动脉冲 + 沿途粒子点云承担——粒子在流动，是"活"的；
-//   · 所有材质 depthTest:false / toneMapped:false / fog:false，
-//     配合 Line2 的屏幕空间等宽，保证从任何视角看粗细亮度都一致。
+// 旧版问题：9 台机组各自放射直连升压站（home-run），不是真实集电系统。
+// 现在：每列一串 —— 远排→中排→近排 串接后由一回集电干线汇入升压站
+// （COLLECTOR_CHAINS，3 回集电线路，真实陆上风电场典型做法）；
+// 外送 2 回 220kV 走向 APPROACH。视觉上保留“能量汇流”的冰河叙事。
+//
+// 工程修正：
+//   · D3：脉冲/晶粒定位全部查 LUT（弧长均匀采样一次性烘焙），
+//     逐帧不再 getPointAt；
+//   · C1：线芯/微光/脉冲/晶粒 depthTest:true——跨山脊出线路径被正确遮挡；
+//     屏幕空间等宽 + toneMapped:false 仍保证亮度视角无关；
+//   · Line2 分辨率经统一注册表同步（D9，见 holoParts/LineResSync）；
+//   · 所有随机排布使用确定性随机源 rng(seed)。
 // ============================================================================
 
 const C_CORE    = new THREE.Color(0.72, 0.92, 1.0)
+const C_TRUNK   = new THREE.Color(0.85, 1.0, 1.0)
 const C_HALO    = new THREE.Color(0.25, 0.62, 0.95)
 const C_PULSE   = new THREE.Color(0.85, 1.5, 2.0)
 const C_GLITTER = new THREE.Color(0.45, 0.85, 1.15)
@@ -30,7 +38,6 @@ varying float vA;
 uniform float uTime;
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  // 呼吸 + 轻微闪烁
   float tw = 0.55 + 0.45 * sin(uTime * 1.6 + aPhase * 22.0);
   vA = tw;
   gl_PointSize = 2.2 * (380.0 / max(-mv.z, 180.0));
@@ -54,7 +61,7 @@ function hug(x: number, z: number, extra = 0) {
   return terrainHeight(x, z) + LIFT + extra
 }
 
-/** 沿曲线弧长均匀采样，返回 [x,y,z,...] */
+/** 沿曲线弧长均匀采样并贴地，返回 [x,y,z,...]（同时用作脉冲 LUT） */
 function sampleCurve(curve: THREE.CatmullRomCurve3, extraLift = 0): number[] {
   const totalLen = curve.getLength()
   const n = Math.max(120, Math.ceil(totalLen / 3.5))
@@ -77,22 +84,35 @@ function buildLineGeom(points: number[]): LineGeometry {
 
 export default function CableNetwork() {
   const pulses = useRef<THREE.InstancedMesh>(null!)
-  const { size } = useThree()
 
   const built = useMemo(() => {
     const group = new THREE.Group()
+    const rand = rng(20260827)
 
-    // ------- 线材质：屏幕空间恒定宽度 -------
+    // ------- 线材质：屏幕空间恒定宽度（单例级共享，分辨率统一注册） -------
     const matCore = new LineMaterial({
       color: C_CORE.getHex(),
       linewidth: 0.85,
       transparent: true,
       opacity: 0.75,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       fog: false,
-      toneMapped: false as any,
       blending: THREE.NormalBlending,   // 核心线用正常混合，避免加色在亮处过曝
+      dashed: false,
+      alphaToCoverage: false,
+    })
+    const matTrunk = new LineMaterial({
+      color: C_TRUNK.getHex(),
+      linewidth: 1.8,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      depthTest: true,
+      fog: false,
+      blending: THREE.NormalBlending,
+      dashed: false,
+      alphaToCoverage: false,
     })
     const matHalo = new LineMaterial({
       color: C_HALO.getHex(),
@@ -100,106 +120,122 @@ export default function CableNetwork() {
       transparent: true,
       opacity: 0.18,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       fog: false,
-      toneMapped: false as any,
       blending: THREE.AdditiveBlending,
+      dashed: false,
+      alphaToCoverage: false,
     })
+    matCore.toneMapped = false
+    matTrunk.toneMapped = false
+    matHalo.toneMapped = false
+    registerLineRes(matCore)
+    registerLineRes(matTrunk)
+    registerLineRes(matHalo)
 
-    // 脉冲材质：小小的光球，加色
     const pulseMat = new THREE.MeshBasicMaterial({
       color: C_PULSE,
       transparent: true,
       opacity: 0.9,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       fog: false,
       toneMapped: false,
       blending: THREE.AdditiveBlending,
     })
     const pulseGeo = new THREE.SphereGeometry(0.55, 8, 8)
 
-    const allCurves: THREE.CatmullRomCurve3[] = []
+    interface CableSeg { lut: number[]; count: number; speed: number }
+    const segs: CableSeg[] = []
     const glitterPos: number[] = []
     const glitterPhase: number[] = []
-    const pulseSpeeds: number[] = []
 
-    const addCable = (pts: THREE.Vector3[], opts: { pulseSpeed?: number } = {}) => {
+    /**
+     * 铺一条电缆：pts 为 (x,z) 拐点的串接路径；trunk=干线（更亮更粗）。
+     * LUT 化：沿线弧长均匀采样一次（含贴地），脉冲/晶粒全部查表。
+     */
+    const addCable = (xz: [number, number][], opts: { trunk?: boolean; pulseSpeed?: number; wanderSeed?: number } = {}) => {
+      const N = Math.max(8, xz.length * 4)
+      const pts: THREE.Vector3[] = []
+      const ws = opts.wanderSeed ?? 0
+      for (let i = 0; i < N; i++) {
+        const t = i / (N - 1)
+        // 多段线性插值 + 蛇形微摆（自然架空走廊观感）
+        const seg = t * (xz.length - 1)
+        const k = Math.min(xz.length - 2, Math.floor(seg))
+        const f = seg - k
+        const [x0, z0] = xz[k]
+        const [x1, z1] = xz[k + 1]
+        const dx = x1 - x0, dz = z1 - z0
+        const len = Math.max(1, Math.hypot(dx, dz))
+        const px = -dz / len, pz = dx / len
+        const wander = Math.sin(ws + t * 6.4) * 34 * Math.sin(t * Math.PI)
+          + Math.sin(ws * 1.7 + t * 13.0) * 12 * Math.sin(t * Math.PI)
+        const x = x0 + dx * f + px * wander
+        const z = z0 + dz * f + pz * wander
+        pts.push(new THREE.Vector3(x, hug(x, z), z))
+      }
       const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.3)
-      allCurves.push(curve)
-      pulseSpeeds.push(opts.pulseSpeed ?? 0.08)
-
-      const pos = sampleCurve(curve)
+      const lut = sampleCurve(curve)
+      segs.push({ lut, count: lut.length / 3, speed: opts.pulseSpeed ?? 0.08 })
 
       // 微光边（在底，柔和抗锯齿/边缘辉）
-      const haloLine = new Line2(buildLineGeom(pos), matHalo)
+      const haloLine = new Line2(buildLineGeom(lut), matHalo)
       haloLine.renderOrder = 1
       haloLine.frustumCulled = false
       group.add(haloLine)
 
-      // 线芯（在上）
-      const coreLine = new Line2(buildLineGeom(pos), matCore)
+      // 线芯（在上；干线用更亮更粗的 matTrunk）
+      const coreLine = new Line2(buildLineGeom(lut), opts.trunk ? matTrunk : matCore)
       coreLine.renderOrder = 2
       coreLine.frustumCulled = false
       group.add(coreLine)
 
-      // 沿路径布静态粒子（闪烁）
+      // 沿路径布静态粒子（闪烁，确定性随机）
       const len = curve.getLength()
       const pDensity = Math.max(50, Math.floor(len / 5))
+      const n = lut.length / 3
       for (let j = 0; j < pDensity; j++) {
-        const t = Math.random()
-        const p = curve.getPointAt(t)
-        const tan = curve.getTangentAt(t)
-        const nx = -tan.z, nz = tan.x
-        const off = (Math.random() - 0.5) * 1.8
-        const x = p.x + nx * off
-        const z = p.z + nz * off
-        glitterPos.push(x, hug(x, z, Math.random() * 0.6), z)
-        glitterPhase.push(Math.random())
+        const fi = rand() * (n - 1)
+        const i0 = Math.floor(fi)
+        const i1 = Math.min(n - 1, i0 + 1)
+        const ff = fi - i0
+        const bx = lut[i0 * 3] + (lut[i1 * 3] - lut[i0 * 3]) * ff
+        const bz = lut[i0 * 3 + 2] + (lut[i1 * 3 + 2] - lut[i0 * 3 + 2]) * ff
+        const off = (rand() - 0.5) * 1.8
+        const x = bx + off
+        const z = bz + off * 0.6
+        glitterPos.push(x, hug(x, z, rand() * 0.6), z)
+        glitterPhase.push(rand())
       }
     }
 
-    // ------- 每台机组 → 升压站 -------
-    FARM.forEach((u, idx) => {
-      const sx = u.x, sz = u.z
-      const ex = SUBSTATION.x - 78 + (idx % 3) * 46
-      const ez = SUBSTATION.z - 52 + Math.floor(idx / 3) * 40
-      const dx = ex - sx, dz = ez - sz
-      const len = Math.hypot(dx, dz)
-      const px = -dz / len, pz = dx / len
-
-      const N = 14
-      const pts: THREE.Vector3[] = []
-      for (let i = 0; i < N; i++) {
-        const t = i / (N - 1)
-        const wander = Math.sin(idx * 2.3 + t * 6.4) * 46 * Math.sin(t * Math.PI)
-          + Math.sin(idx * 5.1 + t * 13.0) * 16 * Math.sin(t * Math.PI)
-        const x = sx + dx * t + px * wander
-        const z = sz + dz * t + pz * wander
-        pts.push(new THREE.Vector3(x, hug(x, z), z))
+    // ------- 串接集电：每列 远→中→近→升压站 -------
+    COLLECTOR_CHAINS.forEach((chain, ci) => {
+      const portX = SUBSTATION.x - 78 + ci * 46
+      const portZ = SUBSTATION.z - 52 + ci * 34
+      // 机间支线段（远→中、中→近）
+      for (let s = 0; s < chain.length - 1; s++) {
+        const a = FARM[chain[s]]
+        const b = FARM[chain[s + 1]]
+        addCable([[a.x, a.z], [b.x, b.z]], { pulseSpeed: 0.09, wanderSeed: ci * 7.3 + s * 2.9 })
       }
-      addCable(pts, { pulseSpeed: 0.08 })
+      // 集电干线：近排→升压站（全场最亮的三股能量流）
+      const near = FARM[chain[chain.length - 1]]
+      addCable(
+        [[near.x, near.z], [near.x + (portX - near.x) * 0.5, near.z + (portZ - near.z) * 0.48], [portX, portZ]],
+        { trunk: true, pulseSpeed: 0.12, wanderSeed: ci * 11.1 + 40 },
+      )
     })
 
-    // ------- 外送线束：5 根扇骨 → 收成 2 根主通道 -------
-    // 上沿：从升压站顶部出去偏上方一束
-    // 下沿：从升压站侧面出去偏下方一束
-    const outRoutes = [
-      { k: -1.8 },
-      { k:  1.8 },
-    ]
+    // ------- 外送线束：2 回 220kV 主通道 -------
+    const outRoutes = [{ k: -1.8 }, { k: 1.8 }]
     for (const { k } of outRoutes) {
       const sx = SUBSTATION.x + 62, sz = SUBSTATION.z + k * 22
       const ex = APPROACH.x,       ez = APPROACH.z + k * 60
       const mx1 = sx + (ex - sx) * 0.4, mz1 = sz + (ez - sz) * 0.38 + k * 18
       const mx2 = sx + (ex - sx) * 0.7, mz2 = sz + (ez - sz) * 0.72 + k * 12
-      const pts = [
-        new THREE.Vector3(sx,  hug(sx,  sz,  1.2), sz),
-        new THREE.Vector3(mx1, hug(mx1, mz1, 0.8), mz1),
-        new THREE.Vector3(mx2, hug(mx2, mz2, 0.4), mz2),
-        new THREE.Vector3(ex,  hug(ex,  ez,  0.0), ez),
-      ]
-      addCable(pts, { pulseSpeed: 0.14 })
+      addCable([[sx, sz], [mx1, mz1], [mx2, mz2], [ex, ez]], { trunk: true, pulseSpeed: 0.14, wanderSeed: 90 + k })
     }
 
     // ------- 粒子点云（沿线路布好的所有粒子） -------
@@ -212,7 +248,7 @@ export default function CableNetwork() {
       uniforms: { uTime: { value: 0 }, uColor: { value: C_GLITTER } },
       transparent: true,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       blending: THREE.AdditiveBlending,
       fog: false,
       toneMapped: false,
@@ -222,55 +258,45 @@ export default function CableNetwork() {
     glitter.frustumCulled = false
     group.add(glitter)
 
-    // 每条线 2-3 个流动脉冲
     const perCurve = 3
-    const lineMats = [matCore, matHalo]
     return {
-      group, allCurves, perCurve, pulseGeo, pulseMat,
-      glitterMat: gm, lineMats, pulseSpeeds,
-      total: allCurves.length * perCurve,
+      group, segs, perCurve, pulseGeo, pulseMat,
+      glitterMat: gm,
+      total: segs.length * perCurve,
     }
   }, [])
 
-  // 每帧：更新 LineMaterial resolution + 驱动脉冲
+  // 每帧：驱动脉冲（LUT 查表，不再 getPointAt）
   const dummy = useMemo(() => new THREE.Object3D(), [])
   useFrame((s) => {
     const t = s.clock.elapsedTime
     built.glitterMat.uniforms.uTime.value = t
 
-    const dpr = s.viewport.dpr
-    const w = size.width * dpr
-    const h = size.height * dpr
-    for (const m of built.lineMats) m.resolution.set(w, h)
-
     const im = pulses.current
     if (!im) return
     let k = 0
-    for (let i = 0; i < built.allCurves.length; i++) {
-      const c = built.allCurves[i]
-      const speed = built.pulseSpeeds[i] ?? 0.08
+    for (let i = 0; i < built.segs.length; i++) {
+      const seg = built.segs[i]
+      const n = seg.count
       for (let j = 0; j < built.perCurve; j++) {
-        const tt = (t * speed + j / built.perCurve + i * 0.137) % 1
-        const p = c.getPointAt(tt)
-        const x = p.x, z = p.z
-        // 脉冲只在中段最亮，首尾淡入淡出
+        const tt = (t * seg.speed + j / built.perCurve + i * 0.137) % 1
+        const fi = tt * (n - 1)
+        const i0 = Math.floor(fi)
+        const i1 = Math.min(n - 1, i0 + 1)
+        const f = fi - i0
+        const x = seg.lut[i0 * 3] + (seg.lut[i1 * 3] - seg.lut[i0 * 3]) * f
+        const y = seg.lut[i0 * 3 + 1] + (seg.lut[i1 * 3 + 1] - seg.lut[i0 * 3 + 1]) * f
+        const z = seg.lut[i0 * 3 + 2] + (seg.lut[i1 * 3 + 2] - seg.lut[i0 * 3 + 2]) * f
         const fade = Math.sin(tt * Math.PI)
-        const s_ = 0.55 + 0.5 * fade
-        dummy.position.set(x, hug(x, z, 0.4), z)
-        dummy.scale.setScalar(s_)
+        const sc = 0.55 + 0.5 * fade
+        dummy.position.set(x, y + 0.4, z)
+        dummy.scale.setScalar(sc)
         dummy.updateMatrix()
         im.setMatrixAt(k++, dummy.matrix)
       }
     }
     im.instanceMatrix.needsUpdate = true
   })
-
-  useEffect(() => {
-    const dpr = window.devicePixelRatio || 1
-    const w = size.width * dpr
-    const h = size.height * dpr
-    for (const m of built.lineMats) m.resolution.set(w, h)
-  }, [built, size])
 
   return (
     <group>

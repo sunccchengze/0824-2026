@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSim } from '../state/simStore'
+import {
+  dailyCurve, integrateDay, makeAlarms, simulate, FARM_RATED_MW,
+  type AlarmItem, type FarmSnap,
+} from '../state/simCore'
+import { SERVOS } from '../scene/terrainUtil'
 
 // ================================================================
-// 未来能源数字孪生系统 —— 大屏 HUD（原图 1920×1080 像素级还原）
-// 布局：顶部标题通栏 / 左列 6 面板 / 右列 3 面板 / 底部时间轴
+// 风电流场智能感知与调控 · 数字孪生大屏 HUD
+// 所有数值由 simCore 单一数据契约驱动（确定性演示数据，非 SCADA/FLORIS）：
+//   时间轴 → 风速/功率/频率/曲线联动；偏航滑杆 → 3D 姿态 + 功率 + 告警；
+//   AUTO → 目标功率实时解算 9 机偏航角（申请书研究内容③演示口径）。
 // ================================================================
 
 const SIZE = { w: 1920, h: 1080 }
@@ -35,49 +42,67 @@ function Panel({ title, en, children, tall }: { title: string; en?: string; chil
   )
 }
 
-/* ---------- 三环（电网功率 NPI） ---------- */
-function NpiDonut({ pct, label }: { pct: number; label: string }) {
+/* ---------- 三环（运行指标） ---------- */
+function KpiDonut({ pct, label }: { pct: number; label: string }) {
   const r = 24, c = 2 * Math.PI * r
+  const v = Math.min(100, Math.max(0, pct))
   return (
     <div className="donut">
       <svg width="74" height="74" viewBox="0 0 74 74">
+        <defs>
+          <linearGradient id="ndGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#a9ecff" />
+            <stop offset="1" stopColor="#3fb8ee" />
+          </linearGradient>
+        </defs>
         <circle cx="37" cy="37" r={r} fill="rgba(8,26,40,.6)" stroke="rgba(70,130,170,.4)" strokeWidth="6" />
         <circle
           cx="37" cy="37" r={r} fill="none" stroke="url(#ndGrad)" strokeWidth="6"
-          strokeDasharray={`${(pct / 100) * c} ${c}`} strokeLinecap="butt"
+          strokeDasharray={`${(v / 100) * c} ${c}`} strokeLinecap="butt"
           transform="rotate(-90 37 37)" className="ring-glow"
         />
-        <text x="37" y="42" textAnchor="middle" className="donut-num">{pct}%</text>
+        <text x="37" y="42" textAnchor="middle" className="donut-num">{Math.round(v)}%</text>
       </svg>
       <div className="dl">{label}</div>
     </div>
   )
 }
 
-/* ---------- 电机塔状态矩阵 2×6 ---------- */
-function Matrix() {
-  const matrix = useSim((s) => s.matrix)
-  const cells = matrix.map((on, i) => (
-    <div key={i} className={`m${on ? ' on' : ' off'}`}>
-      <i className={`dot${i % 4 === 1 ? ' amber' : ''}`} style={{ animationDelay: `${(i % 6) * 0.35}s` }} />
+/* ---------- 机组状态矩阵 3×3 ---------- */
+function Matrix({ snap, alarms }: { snap: FarmSnap; alarms: AlarmItem[] }) {
+  const warn = useMemo(() => {
+    const s = new Set<string>()
+    for (const a of alarms) if (a.level === 'warn' && a.tid) s.add(a.tid)
+    return s
+  }, [alarms])
+  return (
+    <div className="matrix">
+      {snap.units.map((u, i) => {
+        const on = u.status === 'run'
+        const bad = warn.has(u.id)
+        return (
+          <div key={u.id} className={`m${on ? ' on' : ' off'}`} title={`${u.id} · ${on ? '运行' : u.status === 'idle' ? '待机' : '大风切出'} · ${u.powerMW.toFixed(2)} MW · ${u.wind.toFixed(1)} m/s`}>
+            <i className={`dot${bad ? ' bad' : ''}`} style={{ animationDelay: `${(i % 6) * 0.35}s` }} />
+            <span className="mid">{u.id}</span>
+          </div>
+        )
+      })}
     </div>
-  ))
-  return <div className="matrix">{cells}</div>
+  )
 }
 
-/* ---------- 风况雷达（360° 花瓣 + 扫描线） ---------- */
+/* ---------- 风况雷达（8 方位玫瑰 + 实时风速） ---------- */
 const RADAR_DIRS = [
   { t: 'NW', a: -135 }, { t: 'N', a: -90 }, { t: 'NE', a: -45 },
   { t: 'E', a: 0 }, { t: 'SE', a: 45 }, { t: 'S', a: 90 },
   { t: 'SW', a: 135 }, { t: 'W', a: 180 },
 ]
-const PETALS = [0.95, 0.5, 0.78, 0.86, 0.62, 0.9, 0.55, 0.72]
-// 右侧竖排刻度（原图 1.8/0.6/0.2）
-const RINGS = [18, 12, 6]
+// 年风向频率分布（演示口径）：主导风向 S（= 场景粒子流 南→北 的来向，语义自洽）
+const PETALS = [0.35, 0.45, 0.30, 0.55, 0.62, 1.0, 0.72, 0.5]
+const RINGS_MS = [9, 6, 3] // m/s
 
-function Radar() {
+function Radar({ wind }: { wind: number }) {
   const C = 130, R = 92
-  // 花瓣：从内半径沿方向延伸至外缘的径向椭圆（长轴对齐方位角）
   const petals = PETALS.map((v, i) => {
     const a = (RADAR_DIRS[i].a * Math.PI) / 180
     const len = R * 0.88 * v
@@ -111,30 +136,32 @@ function Radar() {
           )
         })}
         {petals}
-        {/* 外圈刻度 */}
         {Array.from({ length: 72 }).map((_, i) => {
           const a = (i * 5 * Math.PI) / 180
           const r1 = R + (i % 6 === 0 ? 8 : 4)
           return <line key={i} x1={C + Math.cos(a) * (R + 1)} y1={C + Math.sin(a) * (R + 1)}
             x2={C + Math.cos(a) * r1} y2={C + Math.sin(a) * r1} stroke="rgba(120,210,250,.3)" strokeWidth="0.7" />
         })}
-        {RINGS.map((v, i) => (
-          <text key={v} x={C + R + 22} y={C - R + 16 + i * 16}
+        {RINGS_MS.map((v, i) => (
+          <text key={v} x={C + R + 18} y={C - R + 16 + i * 16}
             fontSize="8.5" fill="#6fa3c4" textAnchor="middle" className="ringlabel">
-            {v.toFixed(0)}
+            {v}
           </text>
         ))}
+        <text x={C + R + 18} y={C - R + 16 + 3 * 16} fontSize="7.5" fill="#4d7592" textAnchor="middle">m/s</text>
         {RADAR_DIRS.map((d) => {
           const a = (d.a * Math.PI) / 180
           const rr = R + 15
           return (
             <text key={d.t} x={C + Math.cos(a) * rr} y={C + Math.sin(a) * rr + 3}
-              fontSize="9" fill="#8fc6e4" textAnchor="middle" className="dirlabel">
+              fontSize="9" fill={d.t === 'S' ? '#cdf4ff' : '#8fc6e4'} textAnchor="middle" className="dirlabel">
               {d.t}
             </text>
           )
         })}
-        <circle cx={C} cy={C} r={4.5} fill="#bfefff" className="petal" />
+        <text x={C} y={C + 2} textAnchor="middle" className="rwind-v">{wind.toFixed(1)}</text>
+        <text x={C} y={C + 30} textAnchor="middle" className="rwind-l">实时风速 m/s</text>
+        <text x={C} y={C + 46} textAnchor="middle" className="rwind-l dim">主导风向 S（演示数据）</text>
         {/* 扫描扇面 */}
         <g className="sweep"><path d={`M${C} ${C} L${C} ${C - R} A${R} ${R} 0 0 1 ${C + R * 0.71} ${C - R * 0.71} Z`} fill="rgba(120,235,255,.16)" /></g>
       </svg>
@@ -142,34 +169,24 @@ function Radar() {
   )
 }
 
-/* ---------- 实时功率曲线（原图双线） ---------- */
-function PowerChart() {
-  const d = useMemo(() => {
-    const W = 292, H = 196, ML = 30, MR = 8, MT = 12, MB = 26
-    const xs = (i: number) => ML + (i / 47) * (W - ML - MR)
-    const ys = (v: number) => MT + (1 - v / 50) * (H - MT - MB)
-    // 原图形态：白天双峰（08:00 后爬升，12:00 前峰值，14:00 回落，18:00 二峰），夜间低位
-    const shape = (t: number) =>
-      0.16 + 0.4 * Math.exp(-(((t - 9.2) / 3.2) ** 2)) + 0.52 * Math.exp(-(((t - 19.0) / 2.6) ** 2)) + 0.13 * Math.sin(t * 0.9)
-    const pts: number[] = []
-    const fpts: number[] = []
-    for (let i = 0; i < 48; i++) {
-      const t = (i / 47) * 24
-      pts.push(ys(Math.max(0, shape(t) * 42 + 1 * Math.sin(i * 2.7))))
-      fpts.push(ys(Math.max(0, shape(t + 0.35) * 40)))
-    }
-    const line = (arr: number[]) => arr.map((y, i) => `${i === 0 ? 'M' : 'L'}${xs(i).toFixed(1)},${y.toFixed(1)}`).join(' ')
-    const area = `${line(pts)} L${xs(47).toFixed(1)},${ys(0).toFixed(1)} L${xs(0).toFixed(1)},${ys(0).toFixed(1)} Z`
-    return { W, H, ML, MR, MT, MB, xs, ys, line, area, pts, fpts }
-  }, [])
+/* ---------- 实时功率曲线（Actual=当前策略 / Baseline=零偏航基准 + now 标线） ---------- */
+function PowerChart({ curve, nowTH }: { curve: { actual: number[]; baseline: number[] }; nowTH: number }) {
+  const W = 292, H = 196, ML = 30, MR = 8, MT = 12, MB = 26
+  const xs = (i: number) => ML + (i / 47) * (W - ML - MR)
+  const ys = (v: number) => MT + (1 - Math.min(50, Math.max(0, v)) / 50) * (H - MT - MB)
+  const line = (arr: number[]) => arr.map((v, i) => `${i === 0 ? 'M' : 'L'}${xs(i).toFixed(1)},${ys(v).toFixed(1)}`).join(' ')
+  const area = `${line(curve.actual)} L${xs(47).toFixed(1)},${ys(0).toFixed(1)} L${xs(0).toFixed(1)},${ys(0).toFixed(1)} Z`
+  const nowX = ML + (nowTH / 24) * (W - ML - MR)
+  const nowIdx = Math.min(47, Math.max(0, Math.round((nowTH / 24) * 47)))
+  const nowY = ys(curve.actual[nowIdx])
 
   return (
     <div className="chart">
       <div className="legend">
-        <span className="k act" />Actual
-        <span className="k fc" />Forecast
+        <span className="k act" />当前策略
+        <span className="k fc" />零偏航基准
       </div>
-      <svg width="100%" height={d.H} viewBox={`0 0 ${d.W} ${d.H}`} preserveAspectRatio="none">
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
         <defs>
           <linearGradient id="pgrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="rgba(90,215,255,.34)" />
@@ -178,56 +195,68 @@ function PowerChart() {
         </defs>
         {[0, 10, 20, 30, 40, 50].map((v) => (
           <g key={v}>
-            <line x1={d.ML} x2={d.W - d.MR} y1={d.ys(v)} y2={d.ys(v)} stroke="rgba(100,175,215,.12)" strokeWidth="0.7" />
-            <text x={d.ML - 4} y={d.ys(v) + 3} fontSize="8.5" fill="#5f8db0" textAnchor="end">{v}</text>
+            <line x1={ML} x2={W - MR} y1={ys(v)} y2={ys(v)} stroke="rgba(100,175,215,.12)" strokeWidth="0.7" />
+            <text x={ML - 4} y={ys(v) + 3} fontSize="8.5" fill="#5f8db0" textAnchor="end">{v}</text>
           </g>
         ))}
         {[0, 8, 12, 16, 20, 24].map((h) => (
-          <text key={h} x={d.ML + (h / 24) * (d.W - d.ML - d.MR)} y={d.H - 9} fontSize="8.5" fill="#5f8db0" textAnchor="middle">{h === 0 ? '0' : `${h}:00`}</text>
+          <text key={h} x={ML + (h / 24) * (W - ML - MR)} y={H - 9} fontSize="8.5" fill="#5f8db0" textAnchor="middle">{h === 0 ? '0' : `${h}:00`}</text>
         ))}
-        <text x={5} y={d.MT + 26} fontSize="9" fill="#7096b4">Power (MW)</text>
-        <path d={d.area} fill="url(#pgrad)" />
-        <path d={d.line(d.pts)} fill="none" stroke="#66dcff" strokeWidth="1.8" className="chart-glow" />
-        <path d={d.line(d.fpts)} fill="none" stroke="rgba(190,235,255,.5)" strokeWidth="1.1" strokeDasharray="4 3" />
-        <circle cx={d.xs(47)} cy={d.pts[47]} r="3.2" fill="#dff6ff" className="chart-glow" />
+        <text x={5} y={MT + 26} fontSize="9" fill="#7096b4">Power (MW)</text>
+        <path d={area} fill="url(#pgrad)" />
+        <path d={line(curve.actual)} fill="none" stroke="#66dcff" strokeWidth="1.8" className="chart-glow" />
+        <path d={line(curve.baseline)} fill="none" stroke="rgba(190,235,255,.5)" strokeWidth="1.1" strokeDasharray="4 3" />
+        <line x1={nowX} x2={nowX} y1={MT} y2={H - MB} stroke="rgba(150,225,255,.35)" strokeWidth="0.8" strokeDasharray="2 3" />
+        <circle cx={nowX} cy={nowY} r="3.2" fill="#dff6ff" className="chart-glow" />
       </svg>
     </div>
   )
 }
 
-/* ---------- 导颈舵机滑杆 ---------- */
-function ServoSlider({ i }: { i: number }) {
+/* ---------- 偏航执行器滑杆 ---------- */
+function ServoSlider({ i, snap, auto }: { i: number; snap: FarmSnap; auto: boolean }) {
   const servos = useSim((s) => s.servos)
   const setServo = useSim((s) => s.setServo)
-  const v = servos[i]
+  const v = auto ? snap.yaws[SERVOS[i]] : servos[i]
+  const shown = Math.round(v * 10) / 10
   return (
-    <div className="srow">
+    <div className={`srow${auto ? ' auto' : ''}`}>
       <span className="slab">偏航执行器{i + 1}</span>
       <div className="track">
         <input
-          type="range" min={-30} max={30} step={1} value={v}
+          type="range" min={-30} max={30} step={1} value={auto ? 0 : servos[i]}
+          disabled={auto}
+          aria-label={`偏航执行器 ${i + 1}`}
           onChange={(e) => setServo(i, Number(e.target.value))}
-          style={{ ['--p' as string]: `${((v + 30) / 60) * 100}%` }}
         />
         <div className="trk"><i className="fill" style={{ width: `${((v + 30) / 60) * 100}%` }} /><i className="head" style={{ left: `${((v + 30) / 60) * 100}%` }} /></div>
       </div>
-      <span className="sval">{v}</span>
+      <span className="sval">{shown}</span>
     </div>
   )
 }
 
-/* ---------- 报警通知 ---------- */
-function Alarms() {
-  const alarms = useSim((s) => s.alarms)
+/* ---------- 报警通知（可确认） ---------- */
+function Alarms({ alarms }: { alarms: AlarmItem[] }) {
+  const [acked, setAcked] = useState<Set<string>>(new Set())
   return (
     <div className="alist">
-      {alarms.map((a) => (
-        <div key={a.id} className="ait">
-          <i className={`adot ${a.kind}`} />
-          <div className="atext"><b>{a.zh}</b><em>{a.en}</em></div>
-          <span className="atime">{a.minutes}分钟前</span>
-        </div>
-      ))}
+      {alarms.map((a) => {
+        const key = `${a.zh}-${a.minutes}`
+        const isAck = acked.has(key)
+        return (
+          <div
+            key={`${a.id}-${a.zh}`}
+            className={`ait${isAck ? ' acked' : ''}`}
+            title={isAck ? '已确认' : '点击确认该通知'}
+            onClick={() => setAcked((prev) => new Set(prev).add(key))}
+          >
+            <i className={`adot ${a.level === 'warn' ? 'red' : 'cyan'}`} />
+            <div className="atext"><b>{a.zh}</b><em>{a.en}</em></div>
+            <span className="atime">{a.minutes}分钟前</span>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -242,16 +271,13 @@ function Wings({ flip }: { flip?: boolean }) {
           <stop offset="1" stopColor="rgba(70,160,220,.35)" />
         </linearGradient>
       </defs>
-      {/* 主折线：外低内高，向标题收拢 */}
       <g fill="none" stroke="url(#wg)" strokeWidth="1.6">
         <path d="M4 36 L104 36 L136 14 L214 14 L250 30 L376 30" />
         <path d="M14 41 L110 41 L140 21 L210 21 L244 36 L370 36" stroke="rgba(110,200,250,.35)" strokeWidth="1" />
       </g>
-      {/* 垂直小刻度 */}
       {[64, 84, 130, 172, 190, 230, 262, 300, 340].map((x, i) => (
         <line key={i} x1={x} y1={i % 2 ? 36 : 16} x2={x} y2={(i % 2 ? 36 : 16) + (i % 2 ? -10 : 10)} stroke="rgba(150,225,255,.55)" strokeWidth="1" />
       ))}
-      {/* 端点菱形 */}
       {[[106, 36], [138, 14], [250, 30]].map(([x, y], i) => (
         <rect key={i} x={x - 3.2} y={y - 3.2} width="6.4" height="6.4" fill="rgba(170,235,255,.95)" transform={`rotate(45 ${x} ${y})`} />
       ))}
@@ -259,7 +285,6 @@ function Wings({ flip }: { flip?: boolean }) {
   )
 }
 
-/* ---------- 顶角飞翼装饰（原图左右上角羽翼） ---------- */
 function CornerWings({ flip }: { flip?: boolean }) {
   return (
     <svg className={`cwings${flip ? ' flip' : ''}`} viewBox="0 0 340 64" width="340" height="64">
@@ -289,10 +314,14 @@ export default function Hud() {
   const scale = useStageScale()
   const playing = useSim((s) => s.playing)
   const togglePlay = useSim((s) => s.togglePlay)
-  const tHours = useSim((s) => s.tHours)
-  const setAlarms = useSim((s) => s.setAlarms)
+  const introActive = useSim((s) => s.introActive)
+  const auto = useSim((s) => s.auto)
+  const setAuto = useSim((s) => s.setAuto)
+  const targetMW = useSim((s) => s.targetMW)
+  const setTargetMW = useSim((s) => s.setTargetMW)
+  const servos = useSim((s) => s.servos)
 
-  // 时钟动画（rAF 驱动 store）
+  // 时钟动画（rAF 驱动 store；subscribing 组件按粗粒度刻重渲染）
   useEffect(() => {
     let raf = 0
     let last = performance.now()
@@ -309,23 +338,23 @@ export default function Hud() {
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  // 报警计时
-  useEffect(() => {
-    const iv = setInterval(() => {
-      const s = useSim.getState()
-      if (s.playing) {
-        s.setAlarms(s.alarms.map((a) => ({ ...a, minutes: a.minutes >= 59 ? 1 : a.minutes + 1 })))
-      }
-    }, 30000)
-    return () => clearInterval(iv)
-  }, [setAlarms])
+  // 粗粒度订阅：仿真快照 0.05h（游戏 3 分钟≈真实 6s）重算；时钟 1 游戏分钟刷新
+  const tHC = useSim((s) => Math.floor((s.tHours * 20) % 480) / 20)
+  const tMinutes = useSim((s) => Math.floor((s.tHours % 1) * 60))
+  const tHHour = useSim((s) => Math.floor(s.tHours) % 24)
 
-  const hh = String(Math.floor(tHours)).padStart(2, '0')
-  const mm = String(Math.floor((tHours % 1) * 60)).padStart(2, '0')
+  const snap = useMemo(() => simulate(servos, auto, targetMW, tHC), [servos, auto, targetMW, tHC])
+  const alarms = useMemo(() => makeAlarms(snap, servos), [snap, servos])
+  const curve = useMemo(() => dailyCurve(servos, auto, targetMW), [servos, auto, targetMW])
+  const todayMWh = integrateDay(curve.actual, tHC)
+  const yearMWh = integrateDay(curve.actual, 24) * 365
+
+  const hh = String(tHHour).padStart(2, '0')
+  const mm = String(Math.floor(tMinutes)).padStart(2, '0')
 
   return (
     <div className="hud">
-      <div className="stage" style={{ width: SIZE.w, height: SIZE.h, transform: `scale(${scale})` }}>
+      <div className="stage" style={{ width: SIZE.w, height: SIZE.h, transform: `translate(-50%,-50%) scale(${scale})` }}>
         {/* ===== 顶部 ===== */}
         <header className="topbar">
           <div className="cornorn l" /><div className="cornorn r" />
@@ -333,84 +362,126 @@ export default function Hud() {
           <CornerWings flip />
           <Wings />
           <Wings flip />
-          <h1 className="title">未来能源数字孪生系统</h1>
+          <h1 className="title">风电流场智能感知与调控 · 数字孪生系统</h1>
           <div className="tline" />
         </header>
 
         {/* ===== 左列 ===== */}
         <div className="col left">
-          <Panel title="全场功率总览" en="(MWh)">
-            <div className="kpi-xl">479,731</div>
+          <Panel title="全场功率总览" en="(MW) · DEMO">
+            <div className="kpi-xl">{snap.totalMW.toFixed(2)}</div>
+            <div className="subkpi">
+              <span>今日累计 {todayMWh.toFixed(0)} MWh</span>
+              <span>年估算 {Math.round(yearMWh).toLocaleString('en-US')} MWh</span>
+            </div>
           </Panel>
 
           <div className="row2">
             <Panel title="电网频率" en="(Hz)">
-              <div className="kpi-md">50.02</div>
+              <div className="kpi-md">{snap.freqHz.toFixed(2)}</div>
             </Panel>
             <Panel title="无功功率" en="(MVar)">
-              <div className="kpi-md">19</div>
+              <div className="kpi-md">{snap.qMVar.toFixed(1)}</div>
             </Panel>
           </div>
 
           <Panel title="运行机组数">
-            <div className="kpi-row"><span className="kpi-xl sm">9</span><span className="unit">台</span></div>
+            <div className="kpi-row"><span className="kpi-xl sm">{snap.online}</span><span className="unit">/ 9 台</span></div>
           </Panel>
 
-          <Panel title="电网功率" en="(NPI)" tall>
+          <Panel title="运行指标" en="Fleet KPI" tall>
             <div className="donuts">
-              <NpiDonut pct={70} label="瞬时功率" />
-              <NpiDonut pct={99} label="成功率" />
-              <NpiDonut pct={92} label="传输效率" />
+              <KpiDonut pct={snap.capFactorPct} label="容量利用率" />
+              <KpiDonut pct={snap.wakeLossPct} label="尾流损失" />
+              <KpiDonut pct={snap.cpMean * 100} label="风能利用系数" />
             </div>
           </Panel>
 
-          <Panel title="电机塔状态" en="Matrix" tall>
-            <Matrix />
+          <Panel title="机组状态矩阵" en="Matrix" tall>
+            <Matrix snap={snap} alarms={alarms} />
           </Panel>
 
           <Panel title="实时功率" en="Real-time Power" tall>
-            <PowerChart />
+            <PowerChart curve={curve} nowTH={snap.tH} />
           </Panel>
         </div>
 
         {/* ===== 右列 ===== */}
         <div className="col right">
-          <Panel title="风况雷达" en="" tall>
-            <Radar />
+          <Panel title="风况雷达" en="Wind Rose · DEMO" tall>
+            <Radar wind={snap.windBase} />
           </Panel>
 
           <Panel title="偏航角度" en="(deg)" tall>
             <div className="servos">
-              {[0, 1, 2, 3, 4].map((i) => <ServoSlider key={i} i={i} />)}
+              {[0, 1, 2, 3, 4].map((i) => <ServoSlider key={i} i={i} snap={snap} auto={auto} />)}
+            </div>
+            <div className="target-zone">
+              <div className="trow">
+                <span className="slab">目标功率</span>
+                <div className="track">
+                  <input
+                    type="range" min={0} max={FARM_RATED_MW} step={0.5} value={targetMW}
+                    aria-label="目标功率（兆瓦）"
+                    onChange={(e) => setTargetMW(Number(e.target.value))}
+                  />
+                  <div className="trk"><i className="fill" style={{ width: `${(targetMW / FARM_RATED_MW) * 100}%` }} /><i className="head" style={{ left: `${(targetMW / FARM_RATED_MW) * 100}%` }} /></div>
+                </div>
+                <span className="sval">{targetMW.toFixed(1)}</span>
+              </div>
+              <div className="auto-line">
+                <button
+                  className={`auto-btn${auto ? ' on' : ''}`}
+                  onClick={() => setAuto(!auto)}
+                  title="偏航自优：输入需求功率，系统实时解算并下发各机偏航角（演示代理，非 FLORIS/PPO）"
+                >
+                  {auto ? '偏航自优 · 接管中' : '偏航自优 · 已关闭'}
+                </button>
+                {auto && (
+                  <span className="track-note">
+                    实发 {snap.totalMW.toFixed(1)} MW · 偏差 {snap.trackErrMW >= 0 ? '+' : ''}{snap.trackErrMW.toFixed(1)}
+                  </span>
+                )}
+                {!auto && (
+                  <span className="track-note dim">
+                    手动模式 · 限发指令 {targetMW.toFixed(1)} MW · 尾流损失 {snap.wakeLossPct.toFixed(1)}%
+                  </span>
+                )}
+              </div>
             </div>
           </Panel>
 
-          <Panel title="报警通知" tall>
-            <Alarms />
+          <Panel title="报警通知" en="Alarms" tall>
+            <Alarms alarms={alarms} />
           </Panel>
         </div>
 
         {/* ===== 底部时间轴 ===== */}
         <footer className="timeline">
-          <button className="play" onClick={togglePlay} aria-label="play">
+          <button className="play" onClick={togglePlay} aria-label={playing ? '暂停' : '播放'}>
             {playing ? <i className="pause" /> : <i className="tri" />}
           </button>
           <span className="clock">{hh}:{mm}</span>
           <div className="tlbar">
-            <i className="tlfill" style={{ width: `${(tHours / 24) * 100}%` }} />
-            <i className="tlhead" style={{ left: `${(tHours / 24) * 100}%` }} />
+            <i className="tlfill" style={{ width: `${(snap.tH / 24) * 100}%` }} />
+            <i className="tlhead" style={{ left: `${(snap.tH / 24) * 100}%` }} />
             {[...Array(24)].map((_, i) => <i key={i} className="tick" style={{ left: `${(i / 24) * 100}%` }} />)}
           </div>
-          <span className="tail">00:50</span>
-          <svg className="vol" viewBox="0 0 20 16" width="16" height="13">
-            <path d="M1 6 h4 l5 -4 v12 l-5 -4 H1 Z" fill="rgba(170,225,255,.75)" />
-            <path d="M12 5 q3 3 0 6" fill="none" stroke="rgba(170,225,255,.75)" strokeWidth="1.4" />
-            <path d="M14.5 3.5 q5 4.5 0 9" fill="none" stroke="rgba(170,225,255,.5)" strokeWidth="1.4" />
-          </svg>
+          <span className="tl-demo" title="所有数值来自浏览器端确定性演示代理（simCore），非真实 SCADA / FLORIS 求解">
+            演示数据 DEMO · 浏览器代理
+          </span>
+          <span className="tail" title="时间轴比例：50 分钟 = 一昼夜">50min/天</span>
+          <button
+            className="replay"
+            onClick={() => window.dispatchEvent(new Event('aeolus:replay'))}
+            title="回放开场巡航"
+          >↻ 回放开场</button>
         </footer>
 
-        {/* 真实几何已统一全息化；保留原图右下角的演示数据标识，不再显示模式切换。 */}
-        <div className="demo-note">演示数据 DEMO</div>
+        {/* 开场巡航中的跳过提示 */}
+        {introActive && (
+          <div className="skip-hint">开场巡航中 · 点击画面任意处跳过</div>
+        )}
       </div>
     </div>
   )
