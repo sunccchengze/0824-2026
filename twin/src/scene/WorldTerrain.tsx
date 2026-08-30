@@ -78,7 +78,7 @@ export default function WorldTerrain() {
       shader.uniforms.uWind = u.uWind
       shader.uniforms.uGlow = u.uGlow
       shader.vertexShader = shader.vertexShader
-        .replace('void main() {', 'attribute float aRnd;\nvarying float vW;\nuniform float uTime;\nuniform vec2 uWind;\nvoid main() {')
+        .replace('void main() {', 'attribute float aRnd;\nvarying float vW;\nvarying float vD;\nuniform float uTime;\nuniform vec2 uWind;\nvoid main() {')
         .replace(
           '#include <begin_vertex>',
           /* glsl */ `#include <begin_vertex>
@@ -87,19 +87,23 @@ export default function WorldTerrain() {
   float wv = sin(ph) * 0.5 + 0.5;
   float ph2 = dot(wp.xz, vec2(uWind.y, -uWind.x)) * 0.0068 + uTime * 1.05 + aRnd * 4.7;
   float wv2 = sin(ph2) * 0.5 + 0.5;
-  transformed.y += (wv - 0.42) * 6.6 * (0.55 + aRnd * 0.9) + (wv2 - 0.5) * 2.3;
+  vD = distance(wp.xz, cameraPosition.xz);
+  // 远处（趋近地块边缘）逐面起伏收敛：面法线抖动小了，月光下的碎高光就不再"杂乱"
+  float amp = mix(1.0, 0.42, smoothstep(1100.0, 3400.0, vD));
+  transformed.y += ((wv - 0.42) * 6.6 * (0.55 + aRnd * 0.9) + (wv2 - 0.5) * 2.3) * amp;
   vW = clamp(wv * 0.78 + wv2 * 0.22, 0.0, 1.0);`,
         )
       shader.fragmentShader = shader.fragmentShader
-        .replace('void main() {', 'varying float vW;\nuniform float uGlow;\nvoid main() {')
+        .replace('void main() {', 'varying float vW;\nvarying float vD;\nuniform float uGlow;\nvoid main() {')
         .replace(
           '#include <emissivemap_fragment>',
           /* glsl */ `#include <emissivemap_fragment>
   float flow = smoothstep(0.50, 0.985, vW);
-  totalEmissiveRadiance += vec3(0.05, 0.155, 0.205) * flow * uGlow;`,
+  float far = 1.0 - 0.78 * smoothstep(900.0, 3200.0, vD); // 远景轮廓光衰减
+  totalEmissiveRadiance += vec3(0.05, 0.155, 0.205) * flow * uGlow * far;`,
         )
     }
-    m.customProgramCacheKey = () => 'terrain-wave-v3'
+    m.customProgramCacheKey = () => 'terrain-wave-v4'
     m.userData.u = u
     return { geo: ng, mat: m }
   }, [])

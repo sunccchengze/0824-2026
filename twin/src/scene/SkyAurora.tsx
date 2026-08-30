@@ -83,9 +83,14 @@ void main() {
   // 纹理自带真实星场，保留少量动态星点让数字孪生画面仍有呼吸感
   vec2 sp = d.xz / max(0.18, d.y + 0.28);
   vec2 cell = floor(sp * 300.0);
-  float star = step(0.9955, hash(cell));
+  float star = step(0.9880, hash(cell));
   float tw = 0.55 + 0.45 * sin(uTime * 1.6 + hash(cell + 7.7) * 40.0);
   col += vec3(0.70, 0.86, 1.0) * star * tw * smoothstep(0.03, 0.22, h) * 0.20 * (1.0 - uDay);
+  // 第二层更密更暗的微星：夜空星辰数量增加，但单颗更弱，不抢线稿
+  vec2 cell2 = floor(sp * 620.0 + 31.7);
+  float star2 = step(0.9915, hash(cell2));
+  float tw2 = 0.5 + 0.5 * sin(uTime * 1.1 + hash(cell2 + 3.3) * 55.0);
+  col += vec3(0.66, 0.82, 1.0) * star2 * tw2 * smoothstep(0.02, 0.20, h) * 0.11 * (1.0 - uDay);
 
   // 极光带整体随白昼淡出（物理上不严格，但"克制"优先：白天不抢戏）
   col -= col * 0.0; // no-op 保持行号稳定
