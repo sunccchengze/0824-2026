@@ -1,107 +1,126 @@
 import { useMemo } from 'react'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { terrainHeight } from './terrainUtil'
+import { skyState } from './lightState'
+import { windAt } from '../data/farmSim'
+import { useSim } from '../state/simStore'
 
-// 朴素的地形表面：不再使用科技网格，也不使用泥土图片。
-// 地面只保留墨青色磨砂材质、细腻程序微表面和极弱的静态等高线质感。
-const DETAIL_VERT = /* glsl */ `
-varying vec3 vWorld;
-varying vec3 vN;
-void main() {
-  vec4 wp = modelMatrix * vec4(position, 1.0);
-  vWorld = wp.xyz;
-  vN = normalize(normalMatrix * normal);
-  gl_Position = projectionMatrix * viewMatrix * wp;
-}
-`
-const DETAIL_FRAG = /* glsl */ `
-precision highp float;
-varying vec3 vWorld;
-varying vec3 vN;
+// ============================================================
+// 晶面地形（第 12 轮 R3：单层化）
+// 旧实现是两层：静止的不透明基底 + 上浮 0.32m 的半透明"波动罩"——
+// 波动层 alpha 低，观感上"地面在静止的顶层下面动"，浪永远不明显。
+// 现删掉独立波动层：海浪位移直接注入地形本体的 MeshStandardMaterial
+// （onBeforeCompile），于是——
+//   · 唯一一层，不透明，阴影照常接收（turbine 影随波面弯折）；
+//   · flatShading 的法线由片元导数求得，波动后的晶面高光自动跟着涌起；
+//   · 波前沿风流增亮写入 totalEmissiveRadiance（青白单色相，克制）；
+//   · 振幅 ±6.6m 主涌 + ±2.3m 侧涌，传播方向与 windAt 同风源（地面=风向仪）。
+// 高程语义不变：terrainHeight ×0.58 + 26m 台地量化 ×0.42 + 逐面 ±3.2m 抬沉。
+// ============================================================
 
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float noise(vec2 p) {
-  vec2 i = floor(p), f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-             mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-float fbm(vec2 p) {
-  float value = 0.0, amp = 0.5;
-  for (int i = 0; i < 5; i++) {
-    value += amp * noise(p);
-    p = p * 2.03 + 17.1;
-    amp *= 0.5;
-  }
-  return value;
+function hash2(ix: number, iz: number): number {
+  const n = Math.sin(ix * 127.1 + iz * 311.7) * 43758.5453
+  return n - Math.floor(n)
 }
 
-void main() {
-  vec2 p = vWorld.xz;
-  float macro = fbm(p * 0.0032);
-  float fine = fbm(p * 0.026);
-  float micro = noise(p * 0.16);
-  float crack = smoothstep(0.68, 0.82, fine) * smoothstep(0.40, 0.62, noise(p * 0.012 + 4.0));
-  float distanceFade = clamp(1.0 - length(p) / 3900.0, 0.0, 1.0);
-  float grazing = 1.0 - max(dot(normalize(vN), vec3(0.0, 1.0, 0.0)), 0.0);
-
-  // 很淡的静态等高线：沿真实 terrainHeight 生成，不是科技网格，不会移动。
-  float contour = 1.0 - smoothstep(0.0, 0.16, abs(fract(vWorld.y / 28.0) - 0.5));
-  contour *= smoothstep(0.02, 0.16, grazing);
-
-  vec3 dark = vec3(0.006, 0.016, 0.023);
-  vec3 coolRock = vec3(0.018, 0.065, 0.078);
-  vec3 color = mix(dark, coolRock, macro * 0.72 + fine * 0.18);
-  color += vec3(0.015, 0.055, 0.070) * crack * 0.35;
-  color += vec3(0.008, 0.028, 0.038) * micro * 0.28;
-  color += vec3(0.012, 0.042, 0.050) * contour * 0.22;
-  float alpha = (0.12 + macro * 0.12 + grazing * 0.05 + contour * 0.045) * distanceFade;
-  gl_FragColor = vec4(color, alpha);
-}
-`
-
-// W4/W5 真实地形表面：起伏由 terrainHeight 负责，表面由暗色 PBR + 程序微表面负责。
 export default function WorldTerrain() {
-  const { geo, detailGeo, detailMat } = useMemo(() => {
-    const g = new THREE.PlaneGeometry(7600, 7600, 220, 220)
+  const { geo, mat } = useMemo(() => {
+    const g = new THREE.PlaneGeometry(7600, 7600, 128, 128)
     g.rotateX(-Math.PI / 2)
     const pos = g.attributes.position
     for (let i = 0; i < pos.count; i++) {
-      pos.setY(i, terrainHeight(pos.getX(i), pos.getZ(i)))
+      const x = pos.getX(i)
+      const z = pos.getZ(i)
+      const h = terrainHeight(x, z)
+      const terrace = Math.round(h / 26) * 26
+      pos.setY(i, h * 0.58 + terrace * 0.42)
     }
-    g.computeVertexNormals()
+    const ng = g.toNonIndexed()
+    const np = ng.attributes.position as THREE.BufferAttribute
+    const colors = new Float32Array(np.count * 3)
+    const CELL = 7600 / 128
+    for (let f = 0; f < np.count; f += 3) {
+      const cx = (np.getX(f) + np.getX(f + 1) + np.getX(f + 2)) / 3
+      const cz = (np.getZ(f) + np.getZ(f + 1) + np.getZ(f + 2)) / 3
+      const h = hash2(Math.round(cx / CELL), Math.round(cz / CELL))
+      const lift = (h - 0.5) * 6.4
+      // 第 19 轮：逐面明暗差 0.24→0.09，整体色彩变化变小（用户：地面颜色过于惹眼）
+      const shade = 0.90 + hash2(Math.round(cz / CELL) + 57, Math.round(cx / CELL) - 31) * 0.09
+      for (let k = 0; k < 3; k++) {
+        np.setY(f + k, np.getY(f + k) + lift)
+        colors[(f + k) * 3] = shade
+        colors[(f + k) * 3 + 1] = shade
+        colors[(f + k) * 3 + 2] = shade
+      }
+    }
+    ng.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    // 每三角面一个随机相位（逐面独立涌动的种子）
+    const rnds = new Float32Array(np.count)
+    for (let f2 = 0; f2 < np.count / 3; f2++) {
+      const rv = hash2(f2 * 7 + 13, (f2 * 31) % 191)
+      for (let k = 0; k < 3; k++) rnds[f2 * 3 + k] = rv
+    }
+    ng.setAttribute('aRnd', new THREE.BufferAttribute(rnds, 1))
+    ng.computeVertexNormals()
+    g.dispose()
 
-    // 微表面层略微抬高，避免与 PBR 基面 z-fighting。
-    const dg = g.clone()
-    const dpos = dg.attributes.position
-    for (let i = 0; i < dpos.count; i++) dpos.setY(i, dpos.getY(i) + 0.32)
-    dg.computeVertexNormals()
-    const dm = new THREE.ShaderMaterial({
-      vertexShader: DETAIL_VERT,
-      fragmentShader: DETAIL_FRAG,
-      transparent: true,
-      depthWrite: false,
-      depthTest: true,
-      blending: THREE.NormalBlending,
-      fog: false,
+    const u = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(0, 1) }, uGlow: { value: 1 } }
+    const m = new THREE.MeshStandardMaterial({
+      color: '#02060c',
+      vertexColors: true,
+      roughness: 1.0,
+      metalness: 0.0,
+      envMapIntensity: 0.03,
+      flatShading: true,
     })
-
-    return { geo: g, detailGeo: dg, detailMat: dm }
+    m.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = u.uTime
+      shader.uniforms.uWind = u.uWind
+      shader.uniforms.uGlow = u.uGlow
+      shader.vertexShader = shader.vertexShader
+        .replace('void main() {', 'attribute float aRnd;\nvarying float vW;\nvarying float vD;\nuniform float uTime;\nuniform vec2 uWind;\nvoid main() {')
+        .replace(
+          '#include <begin_vertex>',
+          /* glsl */ `#include <begin_vertex>
+  vec4 wp = modelMatrix * vec4(transformed, 1.0);
+  float ph = dot(wp.xz, uWind) * 0.0105 - uTime * 2.15 + aRnd * 1.9;
+  float wv = sin(ph) * 0.5 + 0.5;
+  float ph2 = dot(wp.xz, vec2(uWind.y, -uWind.x)) * 0.0068 + uTime * 1.05 + aRnd * 4.7;
+  float wv2 = sin(ph2) * 0.5 + 0.5;
+  vD = distance(wp.xz, cameraPosition.xz);
+  // 远处（趋近地块边缘）逐面起伏收敛：面法线抖动小了，月光下的碎高光就不再"杂乱"
+  float amp = mix(1.0, 0.42, smoothstep(1100.0, 3400.0, vD));
+  transformed.y += ((wv - 0.42) * 6.6 * (0.55 + aRnd * 0.9) + (wv2 - 0.5) * 2.3) * amp;
+  vW = clamp(wv * 0.78 + wv2 * 0.22, 0.0, 1.0);`,
+        )
+      shader.fragmentShader = shader.fragmentShader
+        .replace('void main() {', 'varying float vW;\nvarying float vD;\nuniform float uGlow;\nvoid main() {')
+        .replace(
+          '#include <emissivemap_fragment>',
+          /* glsl */ `#include <emissivemap_fragment>
+  // 第 19 轮：波峰辉光整体压暗（亮度约 −55%）、色相往青灰收（去蓝绿），
+  // 且 smoothstep 上下沿抬高收窄 → 只有真正的浪尖才亮，面与面的明暗跳动变小。
+  float flow = smoothstep(0.68, 0.995, vW);
+  float far = 1.0 - 0.82 * smoothstep(700.0, 2600.0, vD); // 远景轮廓光衰减（加强）
+  totalEmissiveRadiance += vec3(0.030, 0.070, 0.088) * flow * uGlow * far;`,
+        )
+    }
+    m.customProgramCacheKey = () => 'terrain-wave-v5'
+    m.userData.u = u
+    return { geo: ng, mat: m }
   }, [])
 
-  return (
-    <group>
-      <mesh geometry={geo}>
-        <meshStandardMaterial
-          color="#040911"
-          transparent
-          opacity={0.94}
-          roughness={0.98}
-          metalness={0.02}
-          envMapIntensity={0.10}
-        />
-      </mesh>
-      <mesh geometry={detailGeo} material={detailMat} renderOrder={0} />
-    </group>
-  )
+  useFrame((state) => {
+    const uu = mat.userData.u as { uTime: { value: number }; uWind: { value: THREE.Vector2 }; uGlow: { value: number } }
+    uu.uTime.value = state.clock.elapsedTime
+    // 夜间波前增亮收半（用户：夜里对比过高）；白天保持
+    // 白天上限由 1.00 降到 0.72，夜间下限 0.45→0.34
+    uu.uGlow.value = 0.34 + 0.38 * skyState.dayF
+    const { fromDeg } = windAt(useSim.getState().tHours)
+    const th = (fromDeg * Math.PI) / 180
+    uu.uWind.value.set(Math.sin(th), Math.cos(th)) // 风的去向（北来→+z）
+  })
+
+  return <mesh geometry={geo} material={mat} receiveShadow />
 }
