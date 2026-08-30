@@ -2,7 +2,7 @@
 import { useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { FARM, terrainHeight } from './terrainUtil'
+import { FARM, terrainSurfaceY } from './terrainUtil'
 import { windAt } from '../data/farmSim'
 import { ROTOR_D, WAKE_K, thrustCt, wakeDeflection } from '../data/turbinePhysics'
 import { useSim } from '../state/simStore'
@@ -209,7 +209,7 @@ export default function AirflowField() {
       const vzs = (fz + czv * lat * 1.35) * sp
       const vys = lat * sp * 0.16 + (eff < 0.9 ? 6 : 0)
       const hx = px + vxs * dt, hy = py + vys * dt, hz = pz + vzs * dt
-      const gd = terrainHeight(hx, hz)
+      const gd = terrainSurfaceY(hx, hz)
       const along = (hx - FCX) * fx + (hz - FCZ) * fz
       const across = (hx - FCX) * cxv + (hz - FCZ) * czv
       if (along > CX + 260 || Math.abs(across) > CX * 1.15 || hy > 330) {
@@ -217,7 +217,7 @@ export default function AirflowField() {
         const side = (Math.random() * 2 - 1) * CX * 0.94
         const nx = FCX + fx * back + cxv * side
         const nz = FCZ + fz * back + czv * side
-        const ny = Math.max(terrainHeight(nx, nz) + 4, 4 + Math.random() ** 1.7 * 255)
+        const ny = Math.max(terrainSurfaceY(nx, nz) + 4, 4 + Math.random() ** 1.7 * 255)
         P.px[i] = nx; P.py[i] = ny; P.pz[i] = nz
         pa[i * 6] = nx - vxs * TRAIL
         pa[i * 6 + 1] = ny
@@ -250,7 +250,7 @@ export default function AirflowField() {
     let c = 0
     for (let j = 0; j < NX; j++) {
       const ye = yawErr9[j]
-      const by = terrainHeight(x9[j], z9[j]) + 88
+      const by = terrainSurfaceY(x9[j], z9[j]) + 88
       for (let r = 0; r < N_RING; r++) {
         const ax = 70 + r * (r * 15 + 46)
         const rad0 = ROTOR_D * 0.52 + WAKE_K * ax

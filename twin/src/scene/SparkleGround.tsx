@@ -2,7 +2,7 @@
 import { useMemo, useEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { FARM, SUBSTATION, terrainHeight } from './terrainUtil'
+import { FARM, SUBSTATION, terrainSurfaceY } from './terrainUtil'
 import { mulberry32 } from '../data/rng'
 
 // W3 星光铺地：谷地 + 电缆走廊两处加密（基准图地面冰晶微光）。
@@ -59,7 +59,7 @@ export default function SparkleGround({ count = 4600 }: { count?: number }) {
         z = u.z + (SUBSTATION.z - u.z) * t + (rnd() - 0.5) * 150
       }
       pos[i * 3] = x
-      pos[i * 3 + 1] = terrainHeight(x, z) + 0.9 + rnd() * 3.0
+      pos[i * 3 + 1] = terrainSurfaceY(x, z) + 0.9 + rnd() * 3.0
       pos[i * 3 + 2] = z
       phase[i] = rnd()
       size[i] = 1.4 + rnd() * 3.4

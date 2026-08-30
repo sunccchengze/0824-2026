@@ -2,7 +2,7 @@
 import { useMemo, useEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { FARM, terrainHeight } from './terrainUtil'
+import { FARM, terrainSurfaceY } from './terrainUtil'
 import { buildPathFromCurve, type HugPath } from '../data/paths.ts'
 import { mulberry32 } from '../data/rng.ts'
 import { windAt } from '../data/farmSim.ts'
@@ -109,7 +109,7 @@ export default function WindVeil() {
           const dd = Math.hypot(dx, dz)
           if (dd < 130) x += (dx / Math.max(dd, 1)) * (130 - dd) * 0.5
         }
-        pts.push(new THREE.Vector3(x, terrainHeight(x, z) + 9 + Math.sin(t * Math.PI) * 26 + (li % 3) * 7, z))
+        pts.push(new THREE.Vector3(x, terrainSurfaceY(x, z) + 9 + Math.sin(t * Math.PI) * 26 + (li % 3) * 7, z))
       }
       defs.push({ pts, count: 64, speed: 0.05, size: 2.7, bright: 0.8, wig: 7.5, mod: true })
     })

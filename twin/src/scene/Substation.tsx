@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
-import { SUBSTATION, terrainHeight } from './terrainUtil'
+import { SUBSTATION, terrainSurfaceY } from './terrainUtil'
 
 // ============================================================================
 // 升压站（v3：比例与要素修正 —— docs/07 A8）
@@ -34,7 +34,7 @@ export default function Substation() {
       bush: mkAdd({ color: C_EDGE, opacity: 0.7 }),
     }
   }, [])
-  const y = terrainHeight(SUBSTATION.x, SUBSTATION.z)
+  const y = terrainSurfaceY(SUBSTATION.x, SUBSTATION.z)
   const W = 112, H = 30, D = 52
   // 晶格描边（任务#6）：主体体块EdgesGeometry硬边，强化"全息线稿"语言
   const edges = useMemo(() => ({

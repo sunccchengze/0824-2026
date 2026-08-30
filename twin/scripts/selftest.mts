@@ -7,7 +7,7 @@ import {
   farmFrame, optimizeYaw, windAt, FARM_RATED_MW,
 } from '../src/data/farmSim.ts'
 import { powerCurveKw, yawFactor, wakeDeficit, TILT_F, wakeDeflection } from '../src/data/turbinePhysics.ts'
-import { FARM } from '../src/scene/terrainUtil.ts'
+import { FARM, SUBSTATION, terrainHeight, terrainSurfaceY } from '../src/scene/terrainUtil.ts'
 
 let pass = 0
 let fail = 0
@@ -199,6 +199,35 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
   ok('V&V P0 横偏零偏航恒零 / 反号对称',
     wakeDeflection(0, 5 * D) === 0
     && Math.abs(wakeDeflection(-20, 5 * D) + wakeDeflection(20, 5 * D)) < 1e-9, 'ok')
+}
+
+// 15. 第 20 轮回归：贴地基准唯一性（地面渲染面 vs 物体定位面）
+{
+  // 复刻 WorldTerrain 的顶点高度公式（台地量化 + 逐面 hash 抬沉）
+  const CELL = 7600 / 128
+  const hs = (ix: number, iz: number) => {
+    const n = Math.sin(ix * 127.1 + iz * 311.7) * 43758.5453
+    return n - Math.floor(n)
+  }
+  const renderedY = (x: number, z: number) => {
+    const h = terrainHeight(x, z)
+    const terrace = Math.round(h / 26) * 26
+    return h * 0.58 + terrace * 0.42 + (hs(Math.round(x / CELL), Math.round(z / CELL)) - 0.5) * 6.4
+  }
+  let mx = 0
+  for (const u of FARM) mx = Math.max(mx, Math.abs(terrainSurfaceY(u.x, u.z) - renderedY(u.x, u.z)))
+  mx = Math.max(mx, Math.abs(terrainSurfaceY(SUBSTATION.x, SUBSTATION.z) - renderedY(SUBSTATION.x, SUBSTATION.z)))
+  for (let i = 0; i < 500; i++) {
+    const x = ((i * 733) % 3000) - 1500
+    const z = ((i * 971) % 3000) - 1500
+    mx = Math.max(mx, Math.abs(terrainSurfaceY(x, z) - renderedY(x, z)))
+  }
+  // 修复前机位处最大差 7.34m（T06），风机基座环仅离地 0.9m → 环悬空
+  ok('V&V 贴地基准唯一：terrainSurfaceY ≡ 地面渲染面', mx < 1e-9, `最大差=${mx.toExponential(2)} m`)
+  // 且必须真的不等于原始 terrainHeight（否则说明改错成恒等函数）
+  let diff = 0
+  for (const u of FARM) diff = Math.max(diff, Math.abs(terrainSurfaceY(u.x, u.z) - terrainHeight(u.x, u.z)))
+  ok('V&V terrainSurfaceY 确实带台地/碎化加工（非恒等）', diff > 1, `机位最大偏移=${diff.toFixed(2)} m`)
 }
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)

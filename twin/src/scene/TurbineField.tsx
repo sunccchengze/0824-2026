@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useSim, farmFrameNow } from '../state/simStore'
-import { FARM, SERVOS, terrainHeight } from './terrainUtil'
+import { FARM, SERVOS, terrainSurfaceY } from './terrainUtil'
 import HoloTurbine from './HoloTurbine'
 import { pushFarmFrame } from './frameBus'
 
@@ -40,7 +40,7 @@ export default function TurbineField() {
               idx={i}
               x={u.x}
               z={u.z}
-              y={terrainHeight(u.x, u.z)}
+              y={terrainSurfaceY(u.x, u.z)}
               servo={servoIdx >= 0 || selected === i}
             />
           </group>

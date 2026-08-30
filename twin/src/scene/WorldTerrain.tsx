@@ -32,6 +32,7 @@ export default function WorldTerrain() {
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i)
       const z = pos.getZ(i)
+      // 第 20 轮：台地量化并入 terrainSurfaceY（不含逐面 lift，lift 在下面按面加）
       const h = terrainHeight(x, z)
       const terrace = Math.round(h / 26) * 26
       pos.setY(i, h * 0.58 + terrace * 0.42)

@@ -5,7 +5,7 @@ import * as THREE from 'three'
 import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
-import { APPROACH, FARM, SUBSTATION, terrainHeight } from './terrainUtil'
+import { APPROACH, FARM, SUBSTATION, terrainSurfaceY } from './terrainUtil'
 import { buildHugPath, type HugPath } from '../data/paths.ts'
 import { mulberry32 } from '../data/rng.ts'
 
@@ -54,7 +54,7 @@ void main() {
 `
 
 function hug(x: number, z: number, extra = 0): number {
-  return terrainHeight(x, z) + LIFT + extra
+  return terrainSurfaceY(x, z) + LIFT + extra
 }
 
 export default function CableNetwork() {
