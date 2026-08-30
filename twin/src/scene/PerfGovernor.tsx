@@ -8,15 +8,18 @@ import { useSim } from '../state/simStore'
 // · 以帧时 EMA 判断 GPU 档位：持续 >22ms 降档，持续 <13ms 且自动模式升档；
 // · 档位联动：dpr（Canvas 侧）+ Effects（后期链）；
 // · 提供 ?q=low|medium|high 手动锁档（QA/低配答辩现场兜底）。
-// 目标：1080p 高档 ≥55fps（docs/02 §9 性能预算），软渲染 QA 环境自动落 low。
+// · 启动保护：首个稳定画面后的短暂预热期不切画质，避免 EffectComposer/
+//   render target 在开场前几秒重建，造成黑帧和相机看似闪跳。
 // ============================================================================
 
 const ORDER = ['low', 'medium', 'high'] as const
+const STARTUP_GUARD_MS = 6500
 
 export default function PerfGovernor() {
   const { gl } = useThree()
   const ema = useRef(16)
   const acc = useRef(0)
+  const bootAt = useRef<number | null>(null)
   const lock = useRef<string | null>(
     typeof location !== 'undefined'
       ? (new URLSearchParams(location.search).get('q') as 'low' | 'medium' | 'high' | null)
@@ -24,6 +27,8 @@ export default function PerfGovernor() {
   )
 
   useFrame((_, dt) => {
+    if (bootAt.current === null) bootAt.current = performance.now()
+
     if (lock.current) {
       // 锁档一次性生效
       const q = lock.current as 'low' | 'medium' | 'high'
@@ -35,6 +40,12 @@ export default function PerfGovernor() {
     acc.current += dt
     if (acc.current < 2) return
     acc.current = 0
+
+    // 启动阶段可能同时发生 shader 编译、PMREM 和第一轮 postprocessing
+    // 建立；任何自动降档都会卸载/重建渲染链。让首屏至少稳定一小段时间，
+    // 也避免第一段开场运镜把一次性编译开销误判为持续低性能。
+    if (performance.now() - bootAt.current < STARTUP_GUARD_MS) return
+
     const s = useSim.getState()
     if (!s.qualityAuto) return
     const cur = ORDER.indexOf(s.quality)

@@ -1,5 +1,5 @@
-import { Component, Suspense, useState, type ReactNode } from 'react'
-import { Canvas } from '@react-three/fiber'
+import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { debugEnabled } from './data/debug'
@@ -25,7 +25,7 @@ import { useSim } from './state/simStore'
 // 装配壳（v3）
 //  · D6：ErrorBoundary（场景崩溃 → 品牌错误屏，不再整页白屏）；
 //  · WebGL 上下文丢失 → 捕获、暂停仿真、给出恢复按钮；
-//  · 首帧黑屏修复：品牌 Loading 屏在 Canvas onCreated + 首帧后淡出；
+//  · 首帧黑屏修复：品牌 Loading 屏在 Canvas 首个稳定帧后淡出；
 //  · 开场巡航期间：任意点击画布 = 跳过（C5）；
 //  · dpr 与画质档联动（high ≤2 / medium ≤1.5 / low =1）。
 // ============================================================================
@@ -55,6 +55,35 @@ class SceneBoundary extends Component<{ children: ReactNode }, { err: string | n
   }
 }
 
+/**
+ * 等 Canvas 真正完成两帧绘制后再撤掉启动遮罩。
+ *
+ * onCreated 只代表 WebGL renderer 创建完成，不能代表场景已经画出来；在
+ * 那里立即隐藏遮罩会把 renderer 的首个黑帧暴露给用户。放在 Suspense
+ * 边界内部还能保证异步场景节点已经完成挂载。第二帧再通知 React，给
+ * EffectComposer、环境贴图和相机首帧留出一个完整的交换周期。
+ */
+function SceneReady({ onReady }: { onReady: () => void }) {
+  const frames = useRef(0)
+  const scheduled = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (scheduled.current !== null) cancelAnimationFrame(scheduled.current)
+  }, [])
+
+  useFrame(() => {
+    if (scheduled.current !== null || frames.current >= 2) return
+    frames.current += 1
+    if (frames.current < 2) return
+    scheduled.current = requestAnimationFrame(() => {
+      scheduled.current = null
+      onReady()
+    })
+  })
+
+  return null
+}
+
 // 调试钩子：仅本机（localhost/127.0.0.1）暴露 store，供无头验证与控制台调试；外网构建不生效
 if (typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
   ;(window as unknown as { __sim: typeof useSim }).__sim = useSim
@@ -62,6 +91,7 @@ if (typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.lo
 
 export default function App() {
   const quality = useSim((s) => s.quality)
+  const introDone = useSim((s) => s.introDone)
   const setFatal = useSim((s) => s.setFatal)
   const fatal = useSim((s) => s.fatal)
   const skipIntro = useSim((s) => s.skipIntro)
@@ -91,7 +121,6 @@ export default function App() {
                 setFatal('WebGL 上下文丢失（显卡驱动重置或显存不足）。')
               })
               canvas.addEventListener('webglcontextrestored', () => setFatal(null))
-              requestAnimationFrame(() => setReady(true))
               if (debugEnabled()) {
                 ;(window as unknown as Record<string, unknown>).__aeolus_stats = () => {
                   // 手动单帧渲染计数（EffectComposer 存在时 gl.info 只反映后期 pass）
@@ -122,11 +151,13 @@ export default function App() {
               <Substation />
               <TurbineField />
               <Callouts />
+              <SceneReady onReady={() => setReady(true)} />
+              <CameraRig />
             </Suspense>
-            <CameraRig />
             <PerfGovernor />
             <OrbitControls
               makeDefault
+              enabled={introDone}
               target={CAM.target}
               maxPolarAngle={Math.PI / 2.06}
               minDistance={120}
@@ -137,14 +168,12 @@ export default function App() {
             <Effects />
           </Canvas>
         </SceneBoundary>
-        {!ready && !fatal && (
-          <div className="splash">
-            <div className="splash-logo">AEOLUS TWIN</div>
-            <div className="splash-sub">风电场偏航优化 · 数字孪生系统</div>
-            <div className="splash-bar"><i /></div>
-            <em>正在装配全息场景 · 零外部请求</em>
-          </div>
-        )}
+        <div className={`splash${ready ? ' is-hidden' : ''}`} aria-hidden={ready}>
+          <div className="splash-logo">AEOLUS TWIN</div>
+          <div className="splash-sub">风电场偏航优化 · 数字孪生系统</div>
+          <div className="splash-bar"><i /></div>
+          <em>正在装配全息场景 · 零外部请求</em>
+        </div>
         {fatal && (
           <div className="fatal-screen">
             <div className="fatal-card">

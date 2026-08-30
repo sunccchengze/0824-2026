@@ -436,8 +436,10 @@ button { font-family: inherit; }
 .splash, .fatal-screen {
   position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; flex-direction: column;
   background: radial-gradient(120% 90% at 50% 30%, #071a2b 0%, #03080f 60%, #010407 100%);
-  color: #d7f6ff; transition: opacity 0.6s; text-align: center;
+  color: #d7f6ff; transition: opacity 0.6s ease; text-align: center;
 }
+/* 只在 SceneReady 的稳定帧回调后淡出，避免撤层瞬间露出 Canvas 黑帧。 */
+.splash.is-hidden { opacity: 0; pointer-events: none; }
 .splash-logo { font-family: var(--font-num); font-weight: 700; font-size: 40px; letter-spacing: 0.5em; text-indent: 0.5em; color: #eafdff; text-shadow: 0 0 24px rgba(90, 210, 255, 0.6); }
 .splash-sub { margin-top: 10px; font-size: 13px; letter-spacing: 0.44em; text-indent: 0.44em; color: #6f9cbb; }
 .splash-bar { width: 280px; height: 2px; margin-top: 26px; background: rgba(60, 130, 175, 0.3); overflow: hidden; }

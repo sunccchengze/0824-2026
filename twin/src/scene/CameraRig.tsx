@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
-import { FARM } from './terrainUtil'
+import { CAM, FARM } from './terrainUtil'
 import { useSim } from '../state/simStore'
 import { buildIntroProfile, BOOST_TABLE } from './introProfile'
 
@@ -125,12 +125,21 @@ const COAST_MAX_T = 1.5    // 最长滑行 (s)
 const COAST_MAX_DRIFT = 120 // 最大漂移 (m)，防穿几何
 const FLY_TAU_ON = 0.22    // WASD 按压爬升 (s)
 const FLY_TAU_OFF = 0.9    // WASD 松手滑行 (s)
+// 渲染线程卡顿时不让开场时间线跨越一大段路径；宁可慢一帧，也不瞬移。
+const INTRO_MAX_FRAME = 0.05
+
+const clampFrameDelta = (delta: number) => Math.min(Math.max(delta, 0), INTRO_MAX_FRAME)
 
 export default function CameraRig() {
   const controlsRef = useRef<any>(null)
   const { camera } = useThree()
-  const introStart = useRef<number | null>(null)
   const bookmark = useRef<{ from: THREE.Vector3; fromT: THREE.Vector3; to: THREE.Vector3; toT: THREE.Vector3; t0: number } | null>(null)
+
+  // 开场时间独立于 R3F clock：R3F 在 shader 编译/标签页恢复后可能给出
+  // 很大的 delta，直接用 elapsedTime 会把镜头瞬移到数秒后的节点。
+  const introElapsed = useRef(0)
+  const motionTime = useRef(0)
+  const trackingReady = useRef(false)
 
   // —— 第 24 轮：惯性状态 ——
   // 巡航中 track 的速度（位置/注视点），供 coast 与 WASD 交接
@@ -204,7 +213,11 @@ export default function CameraRig() {
       )
       camera.lookAt(target)
       const ctl0 = (state.controls as any) || controlsRef.current
-      if (ctl0) { ctl0.target.copy(target); ctl0.update() }
+      if (ctl0) {
+        ctl0.enabled = false
+        ctl0.target.copy(target)
+        ctl0.update()
+      }
       const p0 = camera as THREE.PerspectiveCamera
       p0.fov = 47
       p0.updateProjectionMatrix()
@@ -221,13 +234,31 @@ export default function CameraRig() {
       const tg = bm.fromT.clone().lerp(bm.toT, s)
       camera.lookAt(tg)
       const ctl = controlsRef.current
-      if (ctl) { ctl.target.copy(tg); ctl.update() }
+      if (ctl) {
+        ctl.enabled = true
+        ctl.target.copy(tg)
+        ctl.update()
+      }
       if (k >= 1) bookmark.current = null
       return
     }
 
     const s = useSim.getState()
+    const frameStep = clampFrameDelta(delta)
+    motionTime.current += frameStep
+
     if (NO_INTRO && !s.introDone) {
+      // 调试/回归截图跳过开场时也要先落到稳定的英雄机位，不能留下
+      // Canvas 的初始高空机位，避免下一帧 OrbitControls 把镜头拉回去。
+      const target = new THREE.Vector3(...CAM.target)
+      camera.position.set(...CAM.pos)
+      camera.lookAt(target)
+      const ctl0 = controlsRef.current
+      if (ctl0) {
+        ctl0.enabled = false
+        ctl0.target.copy(target)
+        ctl0.update()
+      }
       s.skipIntro()
       return
     }
@@ -243,7 +274,7 @@ export default function CameraRig() {
         flyV.current.copy(co.v) // 把滑行速度直接交给 WASD 惯性
         return
       }
-      const tc = state.clock.elapsedTime - co.t0clk
+      const tc = Math.max(0, motionTime.current - co.t0clk)
       const k = 1 - Math.exp(-tc / COAST_TAU)
       const off = COAST_TAU * k
       const drift = co.v.length() * off
@@ -260,7 +291,11 @@ export default function CameraRig() {
       camera.position.copy(p)
       camera.lookAt(tg)
       const ctc = controlsRef.current
-      if (ctc) { ctc.target.copy(tg); ctc.update() }
+      if (ctc) {
+        ctc.enabled = false
+        ctc.target.copy(tg)
+        ctc.update()
+      }
       const vNow = co.v.length() * Math.exp(-tc / COAST_TAU)
       if (tc >= COAST_MAX_T || vNow < 5 || drift >= COAST_MAX_DRIFT) {
         coast.current = null
@@ -272,10 +307,11 @@ export default function CameraRig() {
     if (s.introDone) {
       // ---- 自由飞行（第 24 轮：惯性速度）：W/S 沿视线，A/D 横移，Space/C 升降，Shift=加速 ----
       const k = keys.current
+      const ctl = controlsRef.current
+      if (ctl) ctl.enabled = true
       const fwd = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0)
       const strafe = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0)
       const lift = (k.has('Space') ? 1 : 0) - (k.has('KeyC') ? 1 : 0)
-      const ctl = controlsRef.current
       if (fwd || strafe || lift) {
         const maxV = (k.has('ShiftLeft') || k.has('ShiftRight') ? 620 : 240)
         const dir = new THREE.Vector3()
@@ -287,16 +323,15 @@ export default function CameraRig() {
         des.y += lift * 0.8
         des.normalize().multiplyScalar(maxV)
         // 按压：指数爬升（τ=0.22s）——不再瞬达
-        flyV.current.lerp(des, 1 - Math.exp(-Math.min(delta, 0.1) / FLY_TAU_ON))
+        flyV.current.lerp(des, 1 - Math.exp(-frameStep / FLY_TAU_ON))
       } else if (flyV.current.lengthSq() > 1) {
         // 松手：指数滑行（τ=0.9s）——InertiaPlugin inertia:"auto" 的落地
-        flyV.current.multiplyScalar(Math.exp(-Math.min(delta, 0.1) / FLY_TAU_OFF))
+        flyV.current.multiplyScalar(Math.exp(-frameStep / FLY_TAU_OFF))
         if (flyV.current.lengthSq() < 2.25) flyV.current.set(0, 0, 0)
       }
       const fly = flyV.current
       if (fly.lengthSq() > 0) {
-        const dt = Math.min(delta, 0.1)
-        const mv = fly.clone().multiplyScalar(dt)
+        const mv = fly.clone().multiplyScalar(frameStep)
         const ny = camera.position.y + mv.y
         if (ny > 14 && ny < 4600) {
           camera.position.add(mv)
@@ -310,16 +345,17 @@ export default function CameraRig() {
       return
     }
 
-    const t0 = state.clock.elapsedTime
-    if (introStart.current === null) introStart.current = 0
-    const el = t0 - introStart.current
-
-    // —— track：本帧速度（供 coast 交接），带 0.5 平滑去帧时抖动 ——
-    const dtc = Math.min(Math.max(delta, 0.001), 0.05)
-    const vNow = camera.position.clone().sub(prevPos.current).divideScalar(dtc)
-    vTrack.current.lerp(vNow, 0.5)
-    const vTgtNow = (controlsRef.current?.target ?? HUB).clone().sub(prevTgt.current).divideScalar(dtc)
-    vTgtTrack.current.lerp(vTgtNow, 0.5)
+    // —— 开场巡航：只用受限帧步进的本地时间 ——
+    // 相机首次进入场景时从固定的路径起点开始，不受 shader 编译或标签页
+    // 恢复造成的大 delta 影响；这样首 5 秒不会出现跨节点黑闪/瞬移。
+    if (!trackingReady.current) {
+      prevPos.current.copy(camera.position)
+      prevTgt.current.copy(controlsRef.current?.target ?? HUB)
+      trackingReady.current = true
+    }
+    const el = introElapsed.current
+    const ctl = controlsRef.current
+    if (ctl) ctl.enabled = false
 
     if (el < INTRO_END) {
       // —— 巡航段：表驱动速度（直线加速 / 弯道减速 / 13 段 boost）——
@@ -330,7 +366,6 @@ export default function CameraRig() {
       camera.lookAt(tg)
       // 转弯侧倾（≤6.2°，克制）：右转(signedK>0)→右倾→rotateZ 取负
       camera.rotateZ(-st.bank)
-      const ctl = controlsRef.current
       if (ctl) {
         ctl.target.copy(tg)
         ctl.update()
@@ -359,27 +394,37 @@ export default function CameraRig() {
       const pathExitBank = -PROFILE.lookup(INTRO_END).bank
       bankOrbit = THREE.MathUtils.lerp(pathExitBank, bankOrbit, smooth01(Math.min(1, e / 0.09)))
       camera.rotateZ(bankOrbit)
-      const ctlO = controlsRef.current
-      if (ctlO) { ctlO.target.copy(hub); ctlO.update() }
+      if (ctl) {
+        ctl.target.copy(hub)
+        ctl.update()
+      }
       const pO = camera as THREE.PerspectiveCamera
       const span = Math.max(PROFILE.vMax - PROFILE.vMin, 1e-3)
       pO.fov = 47 + 4.5 * smooth01((om * rad - PROFILE.vMin) / span)
       pO.updateProjectionMatrix()
-      if (el >= INTRO_TOTAL) {
+      if (el >= INTRO_TOTAL && !coast.current) {
         // 收尾完成 → 惯性滑行进自由轨道（近悬停，漂移 <10m）
         coast.current = {
           p0: camera.position.clone(),
           t0: hub.clone(),
           v: vTrack.current.clone(),
           vt: vTgtTrack.current.clone(),
-          t0clk: t0,
+          t0clk: motionTime.current,
         }
       }
     }
 
+    // 速度必须在本帧相机位姿写入后采样；旧逻辑在写入前采样，导致每次
+    // 都得到近似 0，交接时会突然停住。帧步长仍受上限保护。
+    const dtc = Math.max(frameStep, 0.001)
+    const vNow = camera.position.clone().sub(prevPos.current).divideScalar(dtc)
+    vTrack.current.lerp(vNow, 0.5)
+    const tgNow = ctl ? ctl.target : HUB
+    const vTgtNow = tgNow.clone().sub(prevTgt.current).divideScalar(dtc)
+    vTgtTrack.current.lerp(vTgtNow, 0.5)
     prevPos.current.copy(camera.position)
-    const tgNow = controlsRef.current ? controlsRef.current.target : HUB
     prevTgt.current.copy(tgNow)
+    introElapsed.current = Math.min(INTRO_TOTAL, el + frameStep)
   })
 
   return null
