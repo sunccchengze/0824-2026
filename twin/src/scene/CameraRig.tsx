@@ -119,6 +119,16 @@ const DEBUG_CAM = (() => {
 const NO_INTRO = typeof location !== 'undefined'
   && (new URLSearchParams(location.search).has('intro0') || (DEBUG_ALLOWED && new URLSearchParams(location.search).get('intro') === '0'))
 
+// QA / A/B 帧精确锚点：仅 DEBUG 允许 `?introT=<s>` 把开场时钟直接跳到该秒。
+// 吸收编译停顿的帧间增量模式下，waitMs 无法精确锁定开场时刻，此参数保证复现。
+const INTRO_T_JUMP = (() => {
+  if (!DEBUG_ALLOWED || typeof location === 'undefined') return null
+  const q = new URLSearchParams(location.search).get('introT')
+  if (!q) return null
+  const v = Number(q)
+  return Number.isFinite(v) ? THREE.MathUtils.clamp(v, 0, INTRO_TOTAL) : null
+})()
+
 // —— 惯性参数（InertiaPlugin 语义：track → 指数滑行）——
 const COAST_TAU = 0.3      // 交接滑行时间常数 (s)
 const COAST_MAX_T = 1.5    // 最长滑行 (s)
@@ -323,13 +333,14 @@ export default function CameraRig() {
     const t0 = state.clock.elapsedTime
     if (introStart.current === null) {
       introStart.current = t0
-      introClock.current = 0
+      introClock.current = INTRO_T_JUMP ?? 0
     }
     // 帧间增量累加，单帧钳 0.1s：首帧/PMREM/Shader 编译的“多秒级”停顿
     // 会被吸收（不会让相机瞬移数秒），同时 30–60fps 正常帧率下完全按真实
     // 时长推进，开场不会变慢。渲染停顿被表现为“原地微停”，运动保持连续。
     const dtSafe = Math.min(Math.max(delta, 0.001), 0.1)
-    introClock.current += dtSafe
+    // QA 锚点：?introT=<s> 时冻结在该秒（不继续累加），截图严格复现指定帧
+    if (INTRO_T_JUMP === null) introClock.current += dtSafe
     const el = introClock.current
 
     // —— track：本帧速度（供 coast 交接），带 0.5 平滑去帧时抖动 ——
