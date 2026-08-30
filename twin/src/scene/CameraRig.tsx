@@ -276,10 +276,11 @@ export default function CameraRig() {
         flyV.current.copy(co.v) // 把滑行速度直接交给 WASD 惯性
         return
       }
-      // coast 同样用帧间增量（而非绝对 elapsedTime）：吸收目标结束后的
-      // 首帧 Shader/纹理提交停顿，避免滑行 tc 一次跳数秒导致“减速即瞬移”。
-      introClock.current += Math.min(Math.max(delta, 0.001), 0.1)
-      const tc = introClock.current - co.t0clk
+      // coast 用独立 clock 从 0 开始累加（与开场 clock 解耦）。
+      // 首帧 tc=0 → off=0 → 相机停在被交接的位置；随后按 exp(-t/τ) 指数衰减，
+      // 不会出现“先推进开场 clock 再相减”导致的初始 tc 多一帧，更不会瞬移。
+      co.t0clk += Math.min(Math.max(delta, 0.001), 0.1)
+      const tc = co.t0clk
       const k = 1 - Math.exp(-tc / COAST_TAU)
       const off = COAST_TAU * k
       const drift = co.v.length() * off
@@ -351,11 +352,11 @@ export default function CameraRig() {
       introStart.current = t0
       introClock.current = INTRO_T_JUMP ?? 0
     }
-    // 帧间增量累加，单帧钳 0.1s：首帧/PMREM/Shader 编译的“多秒级”停顿
-    // 会被吸收（不会让相机瞬移数秒），同时 30–60fps 正常帧率下完全按真实
-    // 时长推进，开场不会变慢。渲染停顿被表现为“原地微停”，运动保持连续。
-    const dtSafe = Math.min(Math.max(delta, 0.001), 0.1)
-    // QA 锚点：?introT=<s> 时冻结在该秒（不继续累加），截图严格复现指定帧
+    // 帧间增量累加，但只吸收“超大单帧”停顿（编译/GC/降档>0.5s）：这类帧
+    // 若按真实 delta 推进会一次跳大半秒，观感像“卡+跳”。正常 30–60fps
+    // 甚至 10fps 的设备都不会触发这个阈值，运动完全按真实时长推进，
+    // 不会因单帧钳 0.1 而整体被放慢。QA 锚点：?introT=<s> 冻结不累加。
+    const dtSafe = delta > 0.5 ? 0.1 : Math.max(delta, 0.001)
     if (INTRO_T_JUMP === null) introClock.current += dtSafe
     const el = introClock.current
 
@@ -410,14 +411,21 @@ export default function CameraRig() {
       const span = Math.max(PROFILE.vMax - PROFILE.vMin, 1e-3)
       pO.fov = 47 + 4.5 * smooth01((om * rad - PROFILE.vMin) / span)
       pO.updateProjectionMatrix()
-      if (el >= INTRO_TOTAL) {
-        // 收尾完成 → 惯性滑行进自由轨道（近悬停，漂移 <10m）
+      // 收尾完成 → 惯性滑行进自由轨道（近悬停，漂移 <10m）。
+      // 注意：`introT=` QA 冻结时不触发 coast（保持停在环绕终点复现帧），
+      // 且 coast 初始速度做上限限幅——防止首帧相机位姿未被上一帧更新时
+      // vTrack 携带巨大初值导致“交接瞬间瞬移”。
+      if (el >= INTRO_TOTAL && INTRO_T_JUMP === null) {
+        const vCap = THREE.MathUtils.clamp(PROFILE.vExit * 1.15, 1, 160)
+        const vtCap = vCap
+        const v0 = vTrack.current.length() > vCap ? vTrack.current.clone().normalize().multiplyScalar(vCap) : vTrack.current.clone()
+        const vt0 = vTgtTrack.current.length() > vtCap ? vTgtTrack.current.clone().normalize().multiplyScalar(vtCap) : vTgtTrack.current.clone()
         coast.current = {
           p0: camera.position.clone(),
           t0: hub.clone(),
-          v: vTrack.current.clone(),
-          vt: vTgtTrack.current.clone(),
-          t0clk: introClock.current,
+          v: v0,
+          vt: vt0,
+          t0clk: 0,
         }
       }
     }

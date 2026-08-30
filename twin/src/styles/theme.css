@@ -321,7 +321,10 @@ button { font-family: inherit; }
 .kpi-sub { display: flex; flex-direction: column; gap: 3px; text-align: center; margin-top: 2px; }
 .pchart { flex: 1 1 auto; min-height: 146px; display: flex; flex-direction: column; }
 .pchart .pbody { flex: 1; min-height: 0; display: flex; }
-.pchart .pbody > svg { flex: 1; min-height: 100px; }
+/* PowerChart 的 svg 包在 .chart 里（不是 pbody 直接子元素），
+   必须同时撑起 .chart 高度，否则 svg height=100% 塌陷为 0，曲线不可见 */
+.pchart .pbody .chart { flex: 1; min-height: 100px; display: flex; flex-direction: column; }
+.pchart .pbody .chart svg { flex: 1; height: 100%; min-height: 100px; }
 .palarms { flex: 1 1 auto; min-height: 96px; display: flex; flex-direction: column; }
 .panel.pservo { flex: 1 1 auto; min-height: 420px; display: flex; flex-direction: column; }
 .panel.pservo .pbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
