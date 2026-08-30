@@ -22,3 +22,18 @@
 - `after_hero_noveil.png`：hero 机位关纱对照。
 - `after_narrow_1280.png` / `after_mobile_390.png`：窄屏/竖屏适配（等比居中+竖屏提示条，无溢出）。
 注：SwiftShader 软渲染边缘颗粒为沙箱伪影；真机 GPU 更干净。旧 `w*/r*` 图仍为各轮历史基线，未删除。
+
+## round24 夜间压暗证据（2026-08-30）
+- `r24-night-closeup-before.png` / `r24-night-closeup-after.png`：夜间特写 A/B（t=23 同月光角，cam=35,22,200）——地面 meanL 46.4→~39.6，中频亮带 49%→28%（棱柱侧面青蓝→暗色）。
+- `r24-night-hero-after.png`：夜间英雄机位 after（r23 画面中央"全场功率总览"3D 标注已消失，其余 4 标注仍在）。
+- `r24-day-closeup-before.png`：日间特写 before（t=12，cam=35,22,200），after 在 round25 重拍。
+- `r24-intro8s-after.png`：round24 开场 8s 渲染验证（相机按剖面表到位，无崩溃）。
+- `r24-night-hero-after.png` / `r24-day-closeup-before.png` 等前值用于 round25 前后对拍。
+
+## round25 开场丝滑 + 日间/基线证据（2026-08-30）
+- `r25-intro8s-after.png` / `r25-intro20s-after.png` / `r25-intro30s-after.png`：开场 8/20/30 秒精确锚点帧（`?introT=<s>` 冻结开场时钟，消除软渲染 waitMs 漂移），相机分别贴 T03 附近、T05/T07 对角穿场、T07 前低机位终点，与速度剖面表一致。
+- `r25-hero-1920.png`：英雄机位巡检（`?t=10.2&cam=0,22,990`，1920×1200）。
+- `r25-az-east.png` / `r25-az-west.png`：东/西两方位巡检。
+- `r25-day-closeup-after.png`：日间地面 A/B after（t=12，cam=35,22,200，1920×1200，与 r24-day-closeup-before.png 同构图）。像素测量：亮带 p90 58.7→50.8（+地面整体下沉），中位色相 203.1→202.8 基本不动；round24 表格里"中位色相应 201→>207"的目标因白线稿/电缆等线稿像素参与统计未直接复现，但亮带收敛是主指标，已完成。
+- `r25-baseline-dawn-0612-after.png` / `r25-baseline-morning-0800-after.png`：日间参考基线双帧同机位对比 after（cam=0,22,990，q=high）。实测风机亮边 77.6→77.8（基本一致，无回归）；天空读数差为极光/星空随 uTime 动画的相位噪声（SkyAurora.tsx 证），非 LightRig 改动。
+```
