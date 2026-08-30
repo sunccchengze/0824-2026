@@ -313,10 +313,17 @@ export default function CameraRig() {
         co.t0.y + co.vt.y * off,
         co.t0.z + co.vt.z * off,
       )
-      camera.position.copy(p)
-      camera.lookAt(tg)
+      // coast 也走同一套“目标+指数平滑”，与巡航/环绕保持同一平滑口径，
+      // 杜绝 coast 与前后段之间任何 1px 级的位置/朝向阶跃。
+      const camAlpha = 1 - Math.exp(-Math.min(Math.max(delta, 0.001), 0.25) / CAM_SMOOTH_TAU)
+      smPos.current.lerp(p, camAlpha)
+      smLook.current.lerp(tg, camAlpha)
+      camera.position.copy(smPos.current)
+      _eLook.lookAt(smPos.current, smLook.current, _eUp)
+      _eQuat.setFromRotationMatrix(_eLook)
+      camera.quaternion.slerp(_eQuat, camAlpha)
       const ctc = controlsRef.current
-      if (ctc) { ctc.target.copy(tg); ctc.update() }
+      if (ctc) { ctc.target.copy(smLook.current); ctc.update() }
       const vNow = co.v.length() * Math.exp(-tc / COAST_TAU)
       if (tc >= COAST_MAX_T || vNow < 5 || drift >= COAST_MAX_DRIFT) {
         coast.current = null
