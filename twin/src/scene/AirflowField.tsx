@@ -22,7 +22,7 @@ import { mulberry32 } from '../data/rng.ts'
 // 视觉克制：纯青白加性、无 Bloom；HUD「三维气流场」整层开关。
 // ============================================================================
 
-const N_SEG = 16 // 拖尾线头尾 2 顶点；烟羽管环周段数
+const N_SEG = 24 // 拖尾线头尾 2 顶点；烟羽管环周段数（16→24：管截面更接近正圆）
 const N_RING = 11
 const CX = 1500
 const FCX = FARM.reduce((a, f) => a + f.x, 0) / FARM.length
@@ -180,7 +180,7 @@ export default function AirflowField() {
     const ba = ab.array as Float32Array
     const P = streaks.userData as { px: Float32Array; py: Float32Array; pz: Float32Array }
     const SPEED = 30 // 平流倍率：烟线过场 ~10s（视觉流速≈现场直播的 26 倍）
-    const TRAIL = 0.3 // 拖尾时长（秒，仿真倍率后）→ 线长 ∝ 当地速度
+    const TRAIL = 0.11 // 拖尾时长（秒，仿真倍率后）→ 线长∝当地速度；0.3→0.11：用户反馈画面显乱，收短
     const now = performance.now() / 1000
     for (let i = 0; i < n; i++) {
       let px = P.px[i], py = P.py[i], pz = P.pz[i]
@@ -233,7 +233,7 @@ export default function AirflowField() {
       pa[i * 6 + 3] = px
       pa[i * 6 + 4] = py
       pa[i * 6 + 5] = pz
-      const b = 0.06 + 0.5 * eff
+      const b = 0.05 + 0.36 * eff
       ba[i * 2] = b * 0.1
       ba[i * 2 + 1] = b
     }
@@ -253,9 +253,9 @@ export default function AirflowField() {
         const off = 2 * a * ax * t
         for (let kk = 0; kk < N_SEG; kk++) {
           const ang = (kk / N_SEG) * Math.PI * 2
-          const wob = 1 + 0.12 * Math.sin(ang * 3 + now * 1.8 + j * 2.1)
+          const wob = 1 + 0.035 * Math.sin(ang * 3 + now * 1.2 + j * 2.1) // 0.12→0.035：扭曲幅度收小
           const o = Math.cos(ang) * rad0 * wob + off
-          const h = Math.sin(ang) * rad0 * 0.72 * wob
+          const h = Math.sin(ang) * rad0 * 0.94 * wob // 0.72→0.94：截面接近正圆
           ca[c++] = x9[j] + fx * ax + cxv * o
           ca[c++] = by + h
           ca[c++] = z9[j] + fz * ax + czv * o

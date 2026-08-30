@@ -85,10 +85,10 @@ export default function LightRig() {
       tmp.col.setHex(0xcfe4ff).lerp(new THREE.Color(0xf6fbff), fd)
       sunRef.current.color.copy(tmp.col)
     }
-    if (keyNight.current) keyNight.current.intensity = 0.85 * (0.3 + 0.7 * night)
+    if (keyNight.current) keyNight.current.intensity = 0.62 * (0.3 + 0.7 * night)
     if (hemiRef.current) {
       // 白天压半球光 → 阴影对比更"真实"（不糊成一片）
-      hemiRef.current.intensity = 0.3 + 0.34 * fd
+      hemiRef.current.intensity = 0.42 + 0.24 * fd
       hemiRef.current.color.setHex(0x123448).lerp(new THREE.Color(0x8fb6d0), fd * 0.75)
     }
     if (scene.fog && (scene.fog as THREE.FogExp2).isFogExp2) {

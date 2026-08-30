@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { terrainHeight } from './terrainUtil'
+import { skyState } from './lightState'
 import { windAt } from '../data/farmSim'
 import { useSim } from '../state/simStore'
 
@@ -63,7 +64,7 @@ export default function WorldTerrain() {
     ng.computeVertexNormals()
     g.dispose()
 
-    const u = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(0, 1) } }
+    const u = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(0, 1) }, uGlow: { value: 1 } }
     const m = new THREE.MeshStandardMaterial({
       color: '#040a12',
       vertexColors: true,
@@ -75,6 +76,7 @@ export default function WorldTerrain() {
     m.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = u.uTime
       shader.uniforms.uWind = u.uWind
+      shader.uniforms.uGlow = u.uGlow
       shader.vertexShader = shader.vertexShader
         .replace('void main() {', 'attribute float aRnd;\nvarying float vW;\nuniform float uTime;\nuniform vec2 uWind;\nvoid main() {')
         .replace(
@@ -89,12 +91,12 @@ export default function WorldTerrain() {
   vW = clamp(wv * 0.78 + wv2 * 0.22, 0.0, 1.0);`,
         )
       shader.fragmentShader = shader.fragmentShader
-        .replace('void main() {', 'varying float vW;\nvoid main() {')
+        .replace('void main() {', 'varying float vW;\nuniform float uGlow;\nvoid main() {')
         .replace(
           '#include <emissivemap_fragment>',
           /* glsl */ `#include <emissivemap_fragment>
   float flow = smoothstep(0.50, 0.985, vW);
-  totalEmissiveRadiance += vec3(0.05, 0.155, 0.205) * flow;`,
+  totalEmissiveRadiance += vec3(0.05, 0.155, 0.205) * flow * uGlow;`,
         )
     }
     m.customProgramCacheKey = () => 'terrain-wave-v3'
@@ -103,8 +105,10 @@ export default function WorldTerrain() {
   }, [])
 
   useFrame((state) => {
-    const uu = mat.userData.u as { uTime: { value: number }; uWind: { value: THREE.Vector2 } }
+    const uu = mat.userData.u as { uTime: { value: number }; uWind: { value: THREE.Vector2 }; uGlow: { value: number } }
     uu.uTime.value = state.clock.elapsedTime
+    // 夜间波前增亮收半（用户：夜里对比过高）；白天保持
+    uu.uGlow.value = 0.45 + 0.55 * skyState.dayF
     const { fromDeg } = windAt(useSim.getState().tHours)
     const th = (fromDeg * Math.PI) / 180
     uu.uWind.value.set(Math.sin(th), Math.cos(th)) // 风的去向（北来→+z）
