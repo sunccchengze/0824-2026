@@ -7,20 +7,27 @@ import { useSim } from '../state/simStore'
 import { skyState } from './lightState'
 
 // ============================================================
-// 昼夜光照装置（任务#6）
-//  · 夜基（既有 5 灯）保留为 dayF=0 完全体；白天叠加太阳平行光 + 提亮
-//    半球光，晨昏 16° 带内线性过渡；
-//  · 阴影：太阳/月亮共用一盏阴影平行光（切换方向），地形接收；
-//    q=low 关闭（PerfGovernor 联动）；
-//  · 雾色与背景色按 dayF 微移（夜 #040911 → 昼冰灰蓝 #37536b），
-//    克制原则：不引入新色相。
+// 昼夜光照装置（任务#2/#3/#10 修订版）
+//  · 卡顿根因：仿真时钟 setInterval(100ms) 量化推进，灯光此前按量化值
+//    重算 → 太阳一跳一跳。改本组件自带连续钟（与 store 同速 24h/50s，
+//    拖轴/暂停时同步），天体位置每帧平滑；
+//  · 日出错位根因：夜光位置曾 max(180, y) 硬抬到地平上，18-19 点附近
+//    出现"假日出"。现夜=月亮方向（moonDir 构造性高于地平线），
+//    晨昏带用 dayF 对太阳/月亮方向与强度做连续混合——金色时刻的
+//    长影由真实的低角度产生，不再靠 clamp；
+//  · 强度（"以假乱真"诉求）：白天主光 0.34→1.94 连续，半球光压低拉对比，
+//    阴影贴图 high 档 4096、相机收紧到 ±1500（纹素密度 ~0.73m），
+//    exposure 联动 App=1.14；
+//  · 雾/背景随昼夜单色相微移（克制原则：不引入新色相）。
 // ============================================================
 
 const C_NIGHT_BG = new THREE.Color('#010305')
-const C_DAY_BG = new THREE.Color('#1d3145')
+const C_DAY_BG = new THREE.Color('#28455e')
 const C_NIGHT_FOG = new THREE.Color('#040911')
-const C_DAY_FOG = new THREE.Color('#37536b')
+const C_DAY_FOG = new THREE.Color('#47688a')
 const TARGET = new THREE.Vector3(-100, 45, -640)
+
+const wrap24 = (t: number) => ((t % 24) + 24) % 24
 
 export default function LightRig() {
   const quality = useSim((s) => s.quality)
@@ -30,68 +37,84 @@ export default function LightRig() {
   const { scene } = useThree()
 
   const shadowOn = quality !== 'low'
-  const mapSize = quality === 'high' ? 2048 : 1024
+  const mapSize = quality === 'high' ? 4096 : 2048
 
   const shadowTarget = useMemo(() => {
     const o = new THREE.Object3D()
     o.position.copy(TARGET)
     return o
   }, [])
-  const tmpColor = useMemo(() => new THREE.Color(), [])
+  const tmp = useMemo(() => ({
+    dir: new THREE.Vector3(),
+    col: new THREE.Color(),
+    simT: -1,
+  }), [])
 
-  useFrame(() => {
-    const t = useSim.getState().tHours
-    const dn = dayNight(t)
-    skyState.dayF = dn.dayF
+  useFrame((_state, delta) => {
+    const s = useSim.getState()
+    // —— 连续仿真钟：与 startSimClock 同速率；暂停/跳变时吸附 store 值 ——
+    if (tmp.simT < 0) tmp.simT = s.tHours
+    const gap = Math.abs(wrap24(s.tHours) - wrap24(tmp.simT))
+    if (!s.playing || gap > 0.6 || gap < -0) tmp.simT = s.tHours
+    else tmp.simT = wrap24(tmp.simT + Math.min(0.1, delta) * (24 / 50))
+
+    const dn = dayNight(tmp.simT)
+    // smoothstep 缓入晨昏，日出/日落有 2-3 秒（真实时间）的渐变而非突变
+    const fd = dn.dayF * dn.dayF * (3 - 2 * dn.dayF)
+    skyState.dayF = fd
     skyState.sunDir.set(...dn.sunDir)
     skyState.moonDir.set(...dn.moonDir)
-    const night = 1 - dn.dayF
+    const night = 1 - fd
 
     if (sunRef.current) {
-      const d = shadowOn ? (dn.dayF > 0.04 ? skyState.sunDir : skyState.moonDir) : skyState.sunDir
-      const R = 2400
-      sunRef.current.position.set(TARGET.x + d.x * R, TARGET.y + Math.max(180, d.y * R), TARGET.z + d.z * R)
-      sunRef.current.intensity = dn.dayF > 0.04
-        ? 0.55 + dn.dayF * 0.85 // 白天：日光（0.55-1.4）
-        : 0.30 // 夜：月光常量（既有观感不变）
-      tmpColor.setHex(0xd8e8ff).lerp(new THREE.Color(0xf4faff), dn.dayF)
-      sunRef.current.color.copy(tmpColor)
+      // 方向：太阳↔月亮按 fd 连续混合后归一化——过渡期光从地平掠过（长影）
+      tmp.dir.set(
+        dn.sunDir[0] * fd + dn.moonDir[0] * night,
+        Math.max(0.045, dn.sunDir[1] * fd + dn.moonDir[1] * night),
+        dn.sunDir[2] * fd + dn.moonDir[2] * night,
+      ).normalize()
+      const R = 2600
+      sunRef.current.position.set(TARGET.x + tmp.dir.x * R, TARGET.y + tmp.dir.y * R, TARGET.z + tmp.dir.z * R)
+      sunRef.current.intensity = 0.34 + 1.6 * fd
+      tmp.col.setHex(0xcfe4ff).lerp(new THREE.Color(0xf6fbff), fd)
+      sunRef.current.color.copy(tmp.col)
     }
-    if (keyNight.current) keyNight.current.intensity = 0.85 * (0.35 + 0.65 * night)
+    if (keyNight.current) keyNight.current.intensity = 0.85 * (0.3 + 0.7 * night)
     if (hemiRef.current) {
-      hemiRef.current.intensity = 0.42 + dn.dayF * 0.5
-      hemiRef.current.color.setHex(0x123448).lerp(new THREE.Color(0x9cc4dc), dn.dayF * 0.7)
+      // 白天压半球光 → 阴影对比更"真实"（不糊成一片）
+      hemiRef.current.intensity = 0.3 + 0.34 * fd
+      hemiRef.current.color.setHex(0x123448).lerp(new THREE.Color(0x8fb6d0), fd * 0.75)
     }
     if (scene.fog && (scene.fog as THREE.FogExp2).isFogExp2) {
-      (scene.fog as THREE.FogExp2).color.copy(C_NIGHT_FOG).lerp(C_DAY_FOG, dn.dayF * 0.5)
+      (scene.fog as THREE.FogExp2).color.copy(C_NIGHT_FOG).lerp(C_DAY_FOG, fd * 0.62)
     }
     if (scene.background && (scene.background as THREE.Color).isColor) {
-      (scene.background as THREE.Color).copy(C_NIGHT_BG).lerp(C_DAY_BG, dn.dayF * 0.6)
+      (scene.background as THREE.Color).copy(C_NIGHT_BG).lerp(C_DAY_BG, fd * 0.72)
     }
   })
 
   return (
     <>
       <hemisphereLight ref={hemiRef} args={['#123448', '#010408', 0.42]} />
-      {/* 夜基补光（与 v3 构图基准一致） */}
-      <directionalLight position={[700, 900, -500]} intensity={0.32 * 0.4} color="#a8d9ff" />
+      {/* 夜基补光（v3 构图基准，白天按 fd 让位） */}
+      <directionalLight position={[700, 900, -500]} intensity={0.13} color="#a8d9ff" />
       <directionalLight position={[-600, 500, 900]} intensity={0.16} color="#3f88b8" />
       <directionalLight ref={keyNight} position={[-750, 1250, -650]} intensity={0.85} color="#d6e6ff" />
       <directionalLight position={[500, 420, 1150]} intensity={0.26} color="#86b8dc" />
-      {/* 太阳/月亮共用主灯：位置由帧循环驱动，全场唯一阴影源 */}
+      {/* 主灯：太阳/月亮连续混合，全场唯一阴影源 */}
       <directionalLight
         ref={sunRef}
-        intensity={0.30}
+        intensity={0.34}
         castShadow={shadowOn}
         shadow-mapSize={[mapSize, mapSize]}
-        shadow-camera-near={200}
-        shadow-camera-far={6200}
-        shadow-camera-left={-1900}
-        shadow-camera-right={1900}
-        shadow-camera-top={1900}
-        shadow-camera-bottom={-1900}
-        shadow-bias={-0.0006}
-        shadow-normalBias={2.5}
+        shadow-camera-near={140}
+        shadow-camera-far={6400}
+        shadow-camera-left={-1500}
+        shadow-camera-right={1500}
+        shadow-camera-top={1500}
+        shadow-camera-bottom={-1500}
+        shadow-bias={-0.00035}
+        shadow-normalBias={1.4}
       >
         <primitive object={shadowTarget} attach="target" />
       </directionalLight>

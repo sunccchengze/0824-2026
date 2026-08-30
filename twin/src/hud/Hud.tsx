@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useSim, useFarmFrame, SERVO_UNIT } from '../state/simStore'
+import { useSim, useFarmFrame } from '../state/simStore'
 import { FARM } from '../scene/terrainUtil'
-import { ROSE_ORDER, UNIT_NAMEPLATE, FARM_RATED_MW } from '../data/farmSim'
+import { UNIT_NAMEPLATE, FARM_RATED_MW } from '../data/farmSim'
 
 // ================================================================
 // 未来能源数字孪生系统 —— 大屏 HUD（v3：全读数接演示数据契约）
@@ -100,77 +100,83 @@ function Matrix() {
   )
 }
 
-/* ---------- 风况雷达（风频玫瑰 · 由数据契约驱动） ---------- */
+/* ---------- 风况玫瑰（任务#1：16 扇区 × 风速分档堆叠，气象口径） ---------- */
+const DIRS16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+const ROSE_BIN_COLORS = ['rgba(62,124,164,.40)', 'rgba(86,178,224,.52)', 'rgba(126,222,255,.74)', 'rgba(226,249,255,.94)']
+const ROSE_BIN_LABELS = ['<6', '6-10', '10-14', '≥14 m/s']
+
 function Radar() {
   const frame = useFarmFrame()
-  const C = 130, R = 92
-  const maxRose = Math.max(...frame.rose, 1)
-  const dirs = useMemo(() => {
-    // 罗盘 8 方位角映射到 SVG 角：N=-90°（上）
-    const map: Record<string, number> = { N: -90, NE: -45, E: 0, SE: 45, S: 90, SW: 135, W: 180, NW: -135 }
-    return ROSE_ORDER.map((t) => ({ t, a: map[t] }))
-  }, [])
-  const petals = frame.rose.map((v, i) => {
-    const a = (dirs[i].a * Math.PI) / 180
-    const len = R * 0.92 * (v / maxRose)
-    const inner = R * 0.14
-    const mid = (inner + len) / 2
-    const rx = Math.max(6, (len - inner) / 2 + 5)
-    const x = C + Math.cos(a) * mid
-    const y = C + Math.sin(a) * mid
-    return <ellipse key={i} cx={x} cy={y} rx={rx} ry={11} fill="rgba(96,220,255,.48)" transform={`rotate(${dirs[i].a} ${x} ${y})`} className="petal" />
+  const C = 118, R = 86, rIn = 11
+  const maxPct = Math.max(1, ...frame.rose)
+  const pol = (deg: number, r: number): [number, number] => [C + Math.cos((deg * Math.PI) / 180) * r, C + Math.sin((deg * Math.PI) / 180) * r]
+  const wedge = (a0: number, a1: number, ra: number, rb: number) => {
+    const [x0, y0] = pol(a0, ra); const [x1, y1] = pol(a1, ra)
+    const [x2, y2] = pol(a1, rb); const [x3, y3] = pol(a0, rb)
+    return `M${x0.toFixed(1)},${y0.toFixed(1)} L${x1.toFixed(1)},${y1.toFixed(1)} A${rb},${rb} 0 0 1 ${x2.toFixed(1)},${y2.toFixed(1)} L${x3.toFixed(1)},${y3.toFixed(1)} A${ra},${ra} 0 0 0 ${x0.toFixed(1)},${y0.toFixed(1)} Z`
+  }
+  const petals = frame.rosePct.flatMap((bins, i) => {
+    const center = -90 + i * 22.5
+    let acc = 0
+    return bins.map((p, b) => {
+      if (p < 0.1) return null
+      const ra = rIn + (R - rIn) * (acc / maxPct); acc += p
+      const rb = rIn + (R - rIn) * (acc / maxPct)
+      return <path key={`${i}-${b}`} d={wedge(center - 10.4, center + 10.4, ra, rb)} fill={ROSE_BIN_COLORS[b]} stroke="rgba(206,242,255,.22)" strokeWidth={0.5} />
+    })
   })
-  // 当前来风矢量角（风从北来 = 箭头指向南；SVG 角系：北=上=-90°）
-  const windA = ((frame.windFromDeg + 180 - 90) * Math.PI) / 180
+  const domI = frame.rose.indexOf(Math.max(...frame.rose))
+  const fromDeg = ((frame.windFromDeg % 360) + 360) % 360
+  const ang = ((fromDeg - 90) * Math.PI) / 180
+  const [ax, ay] = pol(fromDeg - 90, R + 15)
+  const [hx, hy] = pol(fromDeg - 90, 15)
   return (
     <div className="radar">
-      <svg width="260" height="260" viewBox="0 0 260 260" role="img" aria-label={`风频玫瑰，主风来自北，当前风速 ${f1(frame.windSpeed)} 米每秒`}>
+      <svg className="rose-svg" width="236" height="236" viewBox="0 0 236 236" role="img"
+        aria-label={`16 方位风频玫瑰，主风 ${DIRS16[domI]} ${f1(frame.rose[domI])}%，当前 ${f1(frame.windSpeed)} 米每秒，来流方位 ${Math.round(fromDeg)} 度`}>
         <defs>
           <radialGradient id="radarBg" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="rgba(20,70,110,.55)" />
-            <stop offset="78%" stopColor="rgba(8,30,50,.4)" />
+            <stop offset="0%" stopColor="rgba(20,70,110,.5)" />
+            <stop offset="78%" stopColor="rgba(8,30,50,.36)" />
             <stop offset="100%" stopColor="rgba(4,16,28,0)" />
           </radialGradient>
         </defs>
-        <circle cx={C} cy={C} r={R + 14} fill="url(#radarBg)" stroke="rgba(110,215,255,.35)" strokeWidth="1" />
-        <circle cx={C} cy={C} r={R} fill="none" stroke="rgba(110,215,255,.5)" strokeWidth="1.4" />
-        {[0.25, 0.5, 0.75].map((f) => (
-          <circle key={f} cx={C} cy={C} r={R * f} fill="none" stroke="rgba(110,215,255,.2)" strokeWidth="0.8" />
+        <circle cx={C} cy={C} r={R + 14} fill="url(#radarBg)" stroke="rgba(110,215,255,.32)" strokeWidth="1" />
+        <circle cx={C} cy={C} r={R} fill="none" stroke="rgba(110,215,255,.42)" strokeWidth="1" />
+        {[0.5, 1].map((f) => (
+          <circle key={f} cx={C} cy={C} r={rIn + (R - rIn) * f} fill="none" stroke="rgba(110,215,255,.18)" strokeWidth="0.7" />
         ))}
-        {dirs.map((d) => {
-          const a = (d.a * Math.PI) / 180
-          return <line key={d.t} x1={C} y1={C} x2={C + Math.cos(a) * R} y2={C + Math.sin(a) * R} stroke="rgba(110,215,255,.16)" strokeWidth="0.7" />
+        {DIRS16.map((d, i) => {
+          const [x1, y1] = pol(-90 + i * 22.5, rIn)
+          const [x2, y2] = pol(-90 + i * 22.5, R)
+          return <line key={d} x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(120,210,250,.10)" strokeWidth="0.6" />
         })}
+        {/* 主风扇区高亮 */}
+        <path d={wedge(-90 + domI * 22.5 - 10.4, -90 + domI * 22.5 + 10.4, rIn - 3, R + 3)} fill="none" stroke="rgba(190,238,255,.5)" strokeWidth="1" />
         {petals}
-        {Array.from({ length: 72 }).map((_, i) => {
-          const a = (i * 5 * Math.PI) / 180
-          const r1 = R + (i % 6 === 0 ? 8 : 4)
-          return <line key={i} x1={C + Math.cos(a) * (R + 1)} y1={C + Math.sin(a) * (R + 1)} x2={C + Math.cos(a) * r1} y2={C + Math.sin(a) * r1} stroke="rgba(120,210,250,.3)" strokeWidth="0.7" />
-        })}
-        {[0.5, 1.0, 1.5].map((v, i) => (
-          <text key={v} x={C + R + 24} y={C - R + 16 + (2 - i) * 22} fontSize="8.5" fill="#6fa3c4" textAnchor="middle">
-            {v.toFixed(1)}
-          </text>
+        {[0.5, 1].map((f, i) => (
+          <text key={f} x={C + rIn + (R - rIn) * f + 3} y={C - 4 + i * 9} fontSize="8" fill="#6fa3c4">{f1(maxPct * f)}%</text>
         ))}
-        {dirs.map((d) => {
-          const a = (d.a * Math.PI) / 180
-          const rr = R + 15
-          return <text key={d.t} x={C + Math.cos(a) * rr} y={C + Math.sin(a) * rr + 3} fontSize="9" fill="#8fc6e4" textAnchor="middle">{d.t}</text>
+        {(['N', 'E', 'S', 'W'] as const).map((t, i) => {
+          const [x, y] = pol(-90 + i * 90, R + 9)
+          return <text key={t} x={x} y={y + 3} fontSize="9.5" fill="#8fc6e4" textAnchor="middle">{t}</text>
         })}
-        {/* 当前来风矢量（箭头指向风的去向） */}
+        {/* 当前来风矢量：来向 → 场心（气象惯例） */}
         <g className="windvec">
-          <line x1={C - Math.cos(windA) * 70} y1={C - Math.sin(windA) * 70} x2={C + Math.cos(windA) * 70} y2={C + Math.sin(windA) * 70}
-            stroke="#c9f2ff" strokeWidth="1.6" />
-          <path d={`M ${C + Math.cos(windA) * 78} ${C + Math.sin(windA) * 78} l ${-Math.cos(windA - 0.4) * 13} ${-Math.sin(windA - 0.4) * 13} l ${13 * Math.cos(windA + 0.4) * -1} ${-13 * Math.sin(windA + 0.4)} z`}
-            fill="#dff6ff" />
+          <line x1={ax} y1={ay} x2={hx} y2={hy} stroke="#c9f2ff" strokeWidth="1.6" />
+          <path d={`M${hx},${hy} l${-Math.cos(ang - 0.42) * 11},${-Math.sin(ang - 0.42) * 11} M${hx},${hy} l${-Math.cos(ang + 0.42) * 11},${-Math.sin(ang + 0.42) * 11}`} stroke="#c9f2ff" strokeWidth="1.6" fill="none" />
         </g>
-        <circle cx={C} cy={C} r={3.6} fill="#bfefff" />
-        <g className="sweep"><path d={`M${C} ${C} L${C} ${C - R} A${R} ${R} 0 0 1 ${C + R * 0.71} ${C - R * 0.71} Z`} fill="rgba(120,235,255,.13)" /></g>
+        <circle cx={C} cy={C} r={3.2} fill="#bfefff" />
       </svg>
+      <div className="rose-legend">
+        {ROSE_BIN_LABELS.map((t, i) => (
+          <span key={t}><i style={{ background: ROSE_BIN_COLORS[i] }} />{t}</span>
+        ))}
+      </div>
       <div className="radar-readout">
         <b>{f1(frame.windSpeed)} m/s</b>
-        <span>来流方位 {intFmt(((frame.windFromDeg % 360) + 360) % 360)}°</span>
-        <em>环标度 = 频率 %【演示】</em>
+        <span>来流方位 {intFmt(fromDeg)}° · 主风 {DIRS16[domI]} {f1(frame.rose[domI])}%</span>
+        <em>当日 48 个半小时 · 与全场风况同源统计</em>
       </div>
     </div>
   )
@@ -179,7 +185,7 @@ function Radar() {
 /* ---------- 实时功率曲线（数据契约驱动 + 时间游标） ---------- */
 function PowerChart() {
   const frame = useFarmFrame()
-  const W = 292, H = 196, ML = 34, MR = 8, MT = 12, MB = 26
+  const W = 640, H = 104, ML = 40, MR = 14, MT = 10, MB = 20
   const xs = (i: number) => ML + (i / 47) * (W - ML - MR)
   const ys = (v: number) => MT + (1 - v / FARM_RATED_MW) * (H - MT - MB)
   const { line, area } = useMemo(() => {
@@ -230,8 +236,8 @@ function PowerChart() {
 function ServoSlider({ i }: { i: number }) {
   const unitYaw = useSim((s) => s.unitYaw)
   const setUnitYaw = useSim((s) => s.setUnitYaw)
-  const uid = FARM[SERVO_UNIT[i]]?.id ?? '-'
-  const v = unitYaw[SERVO_UNIT[i]] ?? 0
+  const uid = FARM[i]?.id ?? '-'
+  const v = unitYaw[i] ?? 0
   return (
     <div className="srow">
       <span className="slab">偏航执行器{i + 1}<em>→ {uid}</em></span>
@@ -240,8 +246,8 @@ function ServoSlider({ i }: { i: number }) {
           type="range" min={-30} max={30} step={0.5} value={v}
           aria-label={`偏航执行器 ${i + 1}，控制机组 ${uid}`}
           aria-valuetext={`${v.toFixed(1)} 度`}
-          onChange={(e) => setUnitYaw(SERVO_UNIT[i], Number(e.target.value))}
-          onDoubleClick={() => setUnitYaw(SERVO_UNIT[i], 0)}
+          onChange={(e) => setUnitYaw(i, Number(e.target.value))}
+          onDoubleClick={() => setUnitYaw(i, 0)}
           title="拖动设定期望偏航角；双击复位为对风 0°"
           style={{ ['--p' as string]: `${((v + 30) / 60) * 100}%` }}
         />
@@ -443,6 +449,7 @@ export default function Hud() {
   const hh = String(Math.floor(tHours)).padStart(2, '0')
   const mm = String(Math.floor((tHours % 1) * 60)).padStart(2, '0')
   const runN = frame.units.filter((u) => u.status === 'run').length
+  const maxTempC = Math.max(0, ...frame.units.map((u) => u.tempC))
   const curtN = frame.units.filter((u) => u.status === 'curtail').length
   const alarmN = frame.units.filter((u) => u.status === 'alarm').length
 
@@ -489,11 +496,13 @@ export default function Hud() {
           </Panel>
 
           <div className="row2">
-            <Panel title="电网频率" en="(Hz)" badge="演示">
-              <div className={`kpi-md${Math.abs(frame.freqHz - 50) > 0.12 ? ' warn' : ''}`}>{f2(frame.freqHz)}</div>
+            <Panel title="发电机温度" en="峰值 (℃)" badge="代理">
+              <div className={`kpi-md${maxTempC > 93 ? ' warn' : ''}`}>{f1(maxTempC)}</div>
+              <div className="kpi-sub"><span>报警阈值 96℃ · 与告警引擎同源</span></div>
             </Panel>
-            <Panel title="无功功率" en="(MVar)" badge="演示">
-              <div className="kpi-md">{f1(frame.qMVar)}</div>
+            <Panel title="等效满发小时" en="h · 今日" badge="代理">
+              <div className="kpi-md">{f1(frame.energyTodayMWh / FARM_RATED_MW)}</div>
+              <div className="kpi-sub"><span>今日电量 ÷ 装机 {intFmt(FARM_RATED_MW)} MW</span></div>
             </Panel>
           </div>
 
@@ -508,7 +517,7 @@ export default function Hud() {
             <div className="donuts">
               <MetricDonut pct={frame.yawPrecPct} label="对风精度" sub="mean|Δψ|" />
               <MetricDonut pct={frame.targetPct} label="功率达成" sub="actual/target" />
-              <MetricDonut pct={Math.min(100, (frame.wakeLossPct / 60) * 100)} display={`${f1(frame.wakeLossPct)}%`} label="尾流损失" sub="环:0-60%满量程" />
+              <MetricDonut pct={Math.min(100, frame.wakeLossPct)} label="尾流损失" sub="环=0-100%" />
             </div>
           </Panel>
 
@@ -516,20 +525,17 @@ export default function Hud() {
             <Matrix />
           </Panel>
 
-          <Panel title="实时功率" en="Real-time Power" tall badge="代理">
-            <PowerChart />
-          </Panel>
         </div>
 
         {/* ===== 右列 ===== */}
         <div className="col right">
-          <Panel title="风况雷达" en="" tall badge="演示">
+          <Panel title="风况玫瑰" en="Wind Rose" badge="代理">
             <Radar />
           </Panel>
 
           <Panel title="偏航角度" en="(deg)" tall>
             <div className="servos">
-              {[0, 1, 2, 3, 4].map((i) => <ServoSlider key={i} i={i} />)}
+              {Array.from({ length: 9 }, (_, i) => <ServoSlider key={i} i={i} />)}
             </div>
             <ControlConsole />
           </Panel>
@@ -539,7 +545,19 @@ export default function Hud() {
           </Panel>
         </div>
 
-        {/* ===== 底部时间轴 ===== */}
+  {/* 实时功率：底部通栏（任务#7：16:10 全要素无遮挡，图表不再被时间条压住） */}
+      <section className="panel chartbar">
+        <i className="c tl" /><i className="c br" />
+        <header className="ptitle">
+          <i className="sicon" />
+          <span className="zh">实时功率</span>
+          <span className="en">Real-time Power</span>
+          <Badge k="代理" />
+        </header>
+        <PowerChart />
+      </section>
+
+      {/* ===== 底部时间轴 ===== */}
         <footer className="timeline">
           <button className="play" onClick={togglePlay} aria-label={playing ? '暂停时间轴' : '播放时间轴'}>
             {playing ? <i className="pause" /> : <i className="tri" />}

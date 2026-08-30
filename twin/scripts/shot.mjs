@@ -21,8 +21,15 @@ const logs = []
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') logs.push(`[${m.type()}] ${m.text().slice(0, 300)}`) })
 page.on('pageerror', (e) => logs.push(`[pageerror] ${String(e).slice(0, 400)}`))
 await page.goto(url, { waitUntil: 'networkidle0', timeout: 60000 })
+if (process.env.SHOT_INIT) await page.evaluate(process.env.SHOT_INIT)
 await new Promise((r) => setTimeout(r, waitMs))
-await page.screenshot({ path: out })
+if (process.env.SHOT_SEL) {
+  const el = await page.$(process.env.SHOT_SEL)
+  if (!el) throw new Error('selector not found: ' + process.env.SHOT_SEL)
+  await el.screenshot({ path: out })
+} else {
+  await page.screenshot({ path: out })
+}
 console.log('saved', out)
 if (logs.length) console.log('--- console ---\n' + logs.slice(0, 25).join('\n'))
 await browser.close()

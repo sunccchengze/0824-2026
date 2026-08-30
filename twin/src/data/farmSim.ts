@@ -16,7 +16,7 @@
 // ================================================================
 
 import { FARM } from '../scene/terrainUtil.ts'
-import { mulberry32, smoothNoise } from './rng.ts'
+import { smoothNoise } from './rng.ts'
 import {
   powerCurveKw, rotorRpm, wakeDeficit, yawFactor, genTempC, gridFrequency, WAKE_REV} from './turbinePhysics.ts'
 
@@ -85,6 +85,7 @@ export interface FarmFrame {
   baseSeries: number[]
   fcSeries: number[]
   rose: number[]
+  rosePct: number[][]
   alarms: AlarmEvent[]
 }
 
@@ -95,7 +96,13 @@ export function windAt(tHours: number): { u: number; fromDeg: number } {
   const slow = 1.8 * (smoothNoise(tHours * 0.55, 5) - 0.5)
   const fast = 0.64 * (smoothNoise(tHours * 2.7, 9) - 0.5)
   const u = Math.min(13.2, Math.max(5.4, diurnal + slow + fast))
-  const fromDeg = BASE_WIND_FROM + 4 * (smoothNoise(tHours * 0.4, 3) - 0.5) - 1.5
+  // 来流方位：均值风北 + 慢尺度摆摆（veer，N±9°）。幅度小是为了与尾流/对风
+  // 标定（docs/07）兼容；足以让 16 扇区风频玫瑰出现真实的主/次方向分布。
+  const fromDeg =
+    BASE_WIND_FROM - 2 +
+    26 * (smoothNoise(tHours * 0.4, 3) - 0.5) +
+    9 * Math.sin(tHours * 0.13 + 0.9) +
+    4 * Math.sin(tHours * 0.37 + 2.1)
   return { u, fromDeg }
 }
 
@@ -197,6 +204,7 @@ interface HeavyFrame {
   baseSeries: number[]
   fcSeries: number[]
   rose: number[]
+  rosePct: number[][]
   alarms: AlarmEvent[]
 }
 
@@ -285,11 +293,25 @@ function buildHeavy(tq: number, unitYaw: number[], targetMW: number, wind?: Wind
   list.sort((a, b) => a.minutesAgo - b.minutesAgo || a.key - b.key)
   const alarms = list.slice(0, 6)
 
-  // 风频玫瑰：主峰在北（与"北→南"来风叙事一致），单位=出现频率 %
-  const base = [5.2, 13.8, 6.1, 2.4, 1.8, 3.6, 4.4, 7.0]
-  const rnd = mulberry32(1000 + Math.floor(tq))
-  const rose = base.map((b) => Math.max(0.6, Math.round((b + (rnd() - 0.5) * 1.6) * 10) / 10))
-  return { energyTodayMWh, energyYearEstMWh, cfPct, daySeries, baseSeries, fcSeries, rose, alarms }
+  // 风频玫瑰（任务#1 专业化）：不再手工模板——对驱动全场的同一"时变风况"
+  // 剖面（windAt，与功率/风纱消费的风完全同源）做当日 48 个半小时的诚实统计：
+  // 16 罗盘扇区 × 4 风速档，单位 = 出现频率 %。无任何编造数字。
+  const rose = new Array(16).fill(0) as number[]
+  const rosePct: number[][] = Array.from({ length: 16 }, () => new Array(4).fill(0))
+  for (let k = 0; k < 48; k++) {
+    const w = windAt(k * 0.5 + 0.25)
+    const deg = ((w.fromDeg % 360) + 360) % 360
+    const sec = Math.floor(((((deg % 360) + 360) % 360) + 11.25) / 22.5) % 16
+    const b = w.u < 6 ? 0 : w.u < 10 ? 1 : w.u < 14 ? 2 : 3
+    rose[sec] += 100 / 48
+    rosePct[sec][b] += 100 / 48
+  }
+  const r1 = (v: number) => Math.round(v * 10) / 10
+  for (let i = 0; i < 16; i++) {
+    rose[i] = r1(rose[i])
+    for (let b = 0; b < 4; b++) rosePct[i][b] = r1(rosePct[i][b])
+  }
+  return { energyTodayMWh, energyYearEstMWh, cfPct, daySeries, baseSeries, fcSeries, rose, rosePct, alarms }
 }
 
 function hashKey(s: string): number {

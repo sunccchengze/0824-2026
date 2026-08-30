@@ -1,14 +1,27 @@
 import { useMemo } from 'react'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { terrainHeight } from './terrainUtil'
+import { windAt } from '../data/farmSim'
+import { useSim } from '../state/simStore'
 
 // 朴素的地形表面：不再使用科技网格，也不使用泥土图片。
 // 地面只保留墨青色磨砂材质、细腻程序微表面和极弱的静态等高线质感。
+// 任务#11：碎晶"顺风流"层——逐面（aRnd）沿风向行波轻微起伏 + 波前增亮，
+// 既是风场指示器又活跃画面；振幅/速度都克制（贴地 2.2m 波、约 0.6Hz）。
 const DETAIL_VERT = /* glsl */ `
 varying vec3 vWorld;
 varying vec3 vN;
+varying float vW;
+attribute float aRnd;
+uniform float uTime;
+uniform vec2 uWind;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
+  float ph = dot(wp.xz, uWind) * 0.018 - uTime * 1.35 + aRnd * 2.4;
+  float wv = sin(ph) * 0.5 + 0.5;
+  wp.y += (wv - 0.4) * 2.2 * (0.5 + aRnd);
+  vW = wv;
   vWorld = wp.xyz;
   vN = normalize(normalMatrix * normal);
   gl_Position = projectionMatrix * viewMatrix * wp;
@@ -18,6 +31,7 @@ const DETAIL_FRAG = /* glsl */ `
 precision highp float;
 varying vec3 vWorld;
 varying vec3 vN;
+varying float vW;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
@@ -55,7 +69,10 @@ void main() {
   color += vec3(0.015, 0.055, 0.070) * crack * 0.35;
   color += vec3(0.008, 0.028, 0.038) * micro * 0.28;
   color += vec3(0.012, 0.042, 0.050) * contour * 0.22;
-  float alpha = (0.12 + macro * 0.12 + grazing * 0.05 + contour * 0.045) * distanceFade;
+  // 波前顺风流光（青白，单一色相）
+  float flow = smoothstep(0.60, 0.97, vW);
+  color += vec3(0.030, 0.105, 0.140) * flow;
+  float alpha = (0.12 + macro * 0.12 + grazing * 0.05 + contour * 0.045 + flow * 0.10) * distanceFade;
   gl_FragColor = vec4(color, alpha);
 }
 `
@@ -104,15 +121,27 @@ export default function WorldTerrain() {
       }
     }
     ng.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    // 每三角面一个随机相位（贴面独立起伏；detail 层同源共享）
+    const rnds = new Float32Array(np.count / 3 * 3)
+    for (let f2 = 0; f2 < np.count / 3; f2++) {
+      const rv = hash2(f2 * 7 + 13, (f2 * 31) % 191)
+      for (let k = 0; k < 3; k++) rnds[f2 * 3 + k] = rv
+    }
+    ng.setAttribute('aRnd', new THREE.BufferAttribute(rnds, 1))
     ng.computeVertexNormals() // 非索引 → 平面法线，晶面高光由此而来
 
     // 微表面层贴合量化面（等高线按 vWorld.y，仍与台面/坡面自洽）。
     const dg = ng.clone()
     const dpos = dg.attributes.position
     for (let i = 0; i < dpos.count; i++) dpos.setY(i, dpos.getY(i) + 0.32)
+    dg.setAttribute('aRnd', ng.getAttribute('aRnd'))
     const dm = new THREE.ShaderMaterial({
       vertexShader: DETAIL_VERT,
       fragmentShader: DETAIL_FRAG,
+      uniforms: {
+        uTime: { value: 0 },
+        uWind: { value: new THREE.Vector2(0, 1) },
+      },
       transparent: true,
       depthWrite: false,
       depthTest: true,
@@ -122,6 +151,14 @@ export default function WorldTerrain() {
 
     return { geo: ng, detailGeo: dg, detailMat: dm }
   }, [])
+
+  useFrame((state) => {
+    const u = detailMat.uniforms
+    u.uTime.value = state.clock.elapsedTime
+    const { fromDeg } = windAt(useSim.getState().tHours)
+    const th = (fromDeg * Math.PI) / 180
+    u.uWind.value.set(Math.sin(th), Math.cos(th)) // 风的去向（北来→+z）
+  })
 
   return (
     <group>

@@ -66,7 +66,13 @@ button { font-family: inherit; }
 .cwings.flip { right: 10px; left: auto; transform: scaleX(-1); }
 
 /* ===== 列 ===== */
-.col { position: absolute; top: 78px; width: 330px; display: flex; flex-direction: column; gap: 12px; }
+.col {
+  position: absolute; top: 78px; bottom: 116px; width: 330px;
+  display: flex; flex-direction: column; gap: 12px;
+  /* 16:10 适配（任务#7）：列底锚定到时间条之上，超高时列内自适应滚动 */
+  overflow-y: auto; overflow-x: hidden; scrollbar-width: thin;
+  scrollbar-color: rgba(120, 210, 250, 0.3) transparent; overscroll-behavior: contain;
+}
 .col.left { left: 16px; }
 .col.right { right: 16px; width: 306px; }
 
@@ -184,7 +190,7 @@ button { font-family: inherit; }
 @keyframes sweep { to { transform: rotate(360deg); } }
 
 /* ===== 导颈舵机 ===== */
-.servos { display: flex; flex-direction: column; gap: 15px; padding: 6px 2px 2px; }
+.servos { display: flex; flex-direction: column; gap: 11px; padding: 6px 4px 2px 2px; max-height: 38vh; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(120, 210, 250, 0.3) transparent; }
 .srow { display: grid; grid-template-columns: 84px 1fr 38px; align-items: center; gap: 10px; }
 .slab { font-size: 12.5px; letter-spacing: 0.08em; color: #cfeafc; }
 .sval { font-family: var(--font-num); font-size: 15px; font-weight: 600; text-align: right; color: #9fe6ff; text-shadow: 0 0 8px rgba(100, 210, 255, 0.6); line-height: 1.05; }
@@ -313,6 +319,20 @@ button { font-family: inherit; }
 
 /* KPI 副行与警示 */
 .kpi-sub { display: flex; flex-direction: column; gap: 3px; text-align: center; margin-top: 2px; }
+.chartbar {
+  position: absolute; left: 362px; right: 338px; bottom: 52px; z-index: 4;
+  padding: 6px 12px 4px;
+}
+.chartbar .ptitle { margin-bottom: 2px; padding-bottom: 4px; }
+.rose-svg { width: 214px; height: 214px; }
+
+.kpi-delta { display: flex; gap: 10px; align-items: baseline; justify-content: center; margin-top: 5px; font-family: var(--font-num); font-size: 11.5px; color: #a8cfe8; letter-spacing: 0.03em; }
+.kpi-delta em { font-style: normal; font-size: 9px; letter-spacing: 0.1em; color: #7ca7c6; }
+.kpi-delta .up { color: #92f0cf; } .kpi-delta .dn { color: #ffab9c; }
+.kpi-delta .lim { color: #ffd9a0; }
+.rose-legend { display: flex; gap: 9px; justify-content: center; margin-top: 5px; font-size: 8.5px; color: #7ca7c6; letter-spacing: 0.04em; }
+.rose-legend span { display: inline-flex; align-items: center; gap: 3px; }
+.rose-legend i { width: 8px; height: 8px; border-radius: 1px; display: inline-block; }
 .kpi-sub span { font-size: 10px; letter-spacing: 0.06em; color: #79a9c8; font-family: var(--font-num); }
 .kpi-md.warn { filter: drop-shadow(0 0 10px rgba(255, 95, 107, 0.8)); color: #ffb7bd; }
 .donut .dsl { margin-top: 1px; font-size: 8.5px; color: #5f8db0; letter-spacing: 0.08em; font-family: var(--font-mono); }
@@ -435,4 +455,16 @@ button { font-family: inherit; }
     font-size: 11px; letter-spacing: 0.22em; color: rgba(140, 200, 235, 0.8);
     padding: 4px 12px; border: 1px solid rgba(110, 200, 245, 0.25); background: rgba(4, 14, 24, 0.72);
   }
+}
+
+/* 16:10（≈900 高）及以下：整体收紧一档，保证"全部内容可见" */
+@media (max-height: 960px) {
+  .col { gap: 8px; bottom: 104px; }
+  .panel { padding: 7px 10px 8px; }
+  .chartbar { left: 352px; right: 328px; bottom: 48px; }
+  .kpi-xl { font-size: 34px; }
+  .kpi-md { font-size: 22px; }
+  .donut svg { width: 56px; height: 56px; }
+  .rose-svg { width: 188px; height: 188px; }
+  .servos { max-height: 30vh; }
 }

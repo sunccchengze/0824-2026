@@ -54,6 +54,11 @@ class SceneBoundary extends Component<{ children: ReactNode }, { err: string | n
   }
 }
 
+// 调试钩子：仅本机（localhost/127.0.0.1）暴露 store，供无头验证与控制台调试；外网构建不生效
+if (typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
+  ;(window as unknown as { __sim: typeof useSim }).__sim = useSim
+}
+
 export default function App() {
   const quality = useSim((s) => s.quality)
   const setFatal = useSim((s) => s.setFatal)
@@ -77,7 +82,7 @@ export default function App() {
             camera={{ position: [-100, 1720, -640], fov: 54, near: 1, far: 18000 }}
             onCreated={({ gl, scene, camera }) => {
               gl.toneMapping = THREE.ACESFilmicToneMapping
-              gl.toneMappingExposure = 1.0
+              gl.toneMappingExposure = 1.14
               scene.fog = new THREE.FogExp2('#040911', 0.00022)
               const canvas = gl.domElement
               canvas.addEventListener('webglcontextlost', (e) => {

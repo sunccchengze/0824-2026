@@ -27,6 +27,10 @@ import {
 
 const D2R = THREE.MathUtils.degToRad
 const HOLO_PURE = new THREE.Color(1.0, 1.0, 1.0)
+// 选中态金色（任务#9）：线稿/光晕/肋线/地环一体换色；告警红语义优先不受影响
+const GOLD_CORE = new THREE.Color(1.0, 0.875, 0.62)
+const GOLD_HALO = new THREE.Color(1.0, 0.78, 0.4)
+const GOLD_RIB = new THREE.Color(1.0, 0.875, 0.615)
 const HOLO_GLOW = new THREE.Color(0.82, 0.97, 1.0)
 export const ALARM_RED = new THREE.Color('#ff5f6b')
 export const DIM_BLUE = new THREE.Color('#3d5a74')
@@ -52,6 +56,7 @@ varying vec3 vNormal;
 varying vec3 vView;
 varying vec3 vLocal;
 uniform float uTime;
+uniform vec3 uTint; // 任务#9：选中整机组着色（白→金；只增暖不降亮度）
 void main() {
   float facing  = max(dot(normalize(vNormal), normalize(vView)), 0.0);
   float fresnel = pow(1.0 - facing, 3.0);
@@ -60,7 +65,7 @@ void main() {
   float scan  = scanA * 0.45 + scanB * 0.22;
   float flicker = 0.88 + 0.12 * sin(uTime * 9.3 + vLocal.x * 13.7 + vLocal.z * 7.1);
   float alpha = fresnel * (0.18 + scan * 0.10) * flicker;
-  vec3 col = mix(vec3(0.75, 0.95, 1.0), vec3(1.0), facing);
+  vec3 col = mix(vec3(0.75, 0.95, 1.0), vec3(1.0), facing) * uTint;
   gl_FragColor = vec4(col, alpha);
 }
 `
@@ -69,7 +74,7 @@ function makeShellMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: SHELL_VERT,
     fragmentShader: SHELL_FRAG,
-    uniforms: { uTime: { value: 0 } },
+    uniforms: { uTime: { value: 0 }, uTint: { value: new THREE.Vector3(1, 1, 1) } },
     transparent: true,
     depthWrite: false,
     depthTest: true, // 体积暗示层保留正确遮挡
@@ -337,6 +342,7 @@ function buildMerged(): Merged {
 
 // 帧注入走 frameBus（TurbineField 每帧推一次，9 机共享）
 import { getFarmFrame } from './frameBus'
+import { useSim } from '../state/simStore'
 
 // ---------------------------------------------------------------------------
 // 单个机组
@@ -346,6 +352,7 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
   x: number; z: number; y: number
   servo: boolean
 }) {
+  const selected = useSim((st) => st.selected === idx)
   const root = useRef<THREE.Group>(null!)
   const spin = useRef<THREE.Group>(null!)
   const beaconMat = useRef<THREE.MeshBasicMaterial>(null!)
@@ -366,6 +373,11 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime
     assets.shell.uniforms.uTime.value = t
+    // 选中=金色系 / 未选中=纯白（每帧幂等，避免 effect/loop 打架）
+    assets.core.color.copy(selected ? GOLD_CORE : HOLO_PURE)
+    assets.halo.color.copy(selected ? GOLD_HALO : HOLO_GLOW)
+    assets.rib.color.copy(selected ? GOLD_RIB : HOLO_PURE)
+    ;(assets.shell.uniforms.uTint.value as THREE.Vector3).set(selected ? 1.5 : 1, selected ? 1.06 : 1, selected ? 0.42 : 1)
     if (beaconMat.current) {
       beaconMat.current.opacity = 0.3 + 0.7 * Math.pow(0.5 + 0.5 * Math.sin(t * 3.2 + idx * 1.7), 3)
     }
@@ -396,7 +408,7 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
         m.color.copy(DIM_BLUE)
         m.opacity = 0.35
       } else {
-        m.color.copy(HOLO_PURE)
+        m.color.copy(selected ? GOLD_CORE : HOLO_PURE)
         m.opacity = 0.62 + 0.12 * Math.sin(t * 1.4 + idx)
       }
     }
