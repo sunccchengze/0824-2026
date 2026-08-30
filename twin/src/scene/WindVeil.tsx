@@ -89,21 +89,9 @@ export default function WindVeil() {
     const rnd = mulberry32(0x5EED42)
     const defs: StreamDef[] = []
 
-    // ① 远脊来流（6 条）
-    for (let k = 0; k < 6; k++) {
-      const pts: THREE.Vector3[] = []
-      const n = 8
-      const x0 = -1520 + k * 600 + Math.sin(k * 2.7) * 90
-      for (let i = 0; i < n; i++) {
-        const t = i / (n - 1)
-        pts.push(new THREE.Vector3(
-          x0 + t * 280 + Math.sin(t * 3.0 + k * 1.3) * 90,
-          700 - t * 180 + Math.sin(t * Math.PI) * 55 + k * 26,
-          -3380 + t * 1620,
-        ))
-      }
-      defs.push({ pts, count: 300, speed: 0.028, size: 11, bright: 0.5, wig: 13 })
-    }
+    // ①（已删除 2026-08-29）远脊来流：高空氛围流在 depthTest:false 下投影成
+    //    发光套索环悬浮于天地之间（用户实拍反馈），语义冗余且违和——移除，
+    //    全场只保留有物理叙事（尾流减速/聚堆）的列向来流。
 
     // ② 列向来流（11 条，北→南）
     // 列向流线覆盖 FLORIS 阵列列位（colsX −732..532 ±20 抖动 + 两侧余量）
@@ -150,7 +138,10 @@ export default function WindVeil() {
     const m = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
       uniforms: { uColor: { value: new THREE.Color('#7fd2f2') } },
-      transparent: true, depthWrite: false, depthTest: false,
+      transparent: true, depthWrite: false,
+      // 2026-08-29 根因：旧 depthTest:false 让远端粒子流不被山体遮挡，投影成
+      // 悬浮光带（用户实拍"飘环"的另一半来源）。粒子贴地飞行，遮挡就该发生。
+      depthTest: true,
       fog: false, toneMapped: false,
       blending: THREE.AdditiveBlending,
     })

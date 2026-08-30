@@ -83,7 +83,10 @@ export function buildHugPath(
   samplesPerMeter = 1 / 6,
 ): { path: HugPath; curvePts: number[] } {
   const ctrl = plan.map(([x, z]) => new THREE.Vector3(x, 0, z))
-  const curve = new THREE.CatmullRomCurve3(ctrl, false, 'catmullrom', 0.35)
+  // 2026-08-29 根因修复：原 'catmullrom'(uniform) 张力 0.35 在"大站距(632m)+
+  // 进站锐角"处切线外插过冲，曲线自我交叉成悬浮圆环（用户实拍）。centripetal
+  // 参数化（Barry-Goldman）构造性消除尖点/自环。
+  const curve = new THREE.CatmullRomCurve3(ctrl, false, 'centripetal', 0.5)
   const len = curve.getLength()
   const n = Math.max(24, Math.min(720, Math.ceil(len * samplesPerMeter) + 1))
   const v = new THREE.Vector3()

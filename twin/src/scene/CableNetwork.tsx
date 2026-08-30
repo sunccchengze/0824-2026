@@ -17,8 +17,10 @@ import { mulberry32 } from '../data/rng.ts'
 //    （3-4 机一串为 35kV 风电场集电线路的典型接法），外送段收为 2 回。
 //  · D3 性能：脉冲不再逐帧 getPointAt —— 路径构建期离散为等弧长折线表
 //    （data/paths.HugPath），每帧只做索引 + 线性插值。
-//  · 亮度视角无关：Line2 屏幕空间等宽 + depthTest/fog/toneMapped 全关，
-//    任意机位粗细恒定（用户钦定口径）。
+//  · 亮度视角无关：Line2 屏幕空间等宽 + fog/toneMapped 关，任意机位粗细恒定
+//    （用户钦定口径）。depthTest 于 2026-08-29 恢复为 true：旧"全关"把贴地的
+//    集电线在远机上方位成悬浮光带（叠加曲线过冲 = 用户看到的飘环）；
+//    粗细恒定本就由屏幕空间线宽保证，与遮挡无关。
 //  · 电压等级 35 kV：以标注口径写进 HUD（不虚构电缆型号）。
 // ============================================================================
 
@@ -68,7 +70,7 @@ export default function CableNetwork() {
       transparent: true,
       opacity: 0.75,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       fog: false,
       blending: THREE.NormalBlending,
     })
@@ -79,7 +81,7 @@ export default function CableNetwork() {
       transparent: true,
       opacity: 0.16,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       fog: false,
       blending: THREE.AdditiveBlending,
     })
@@ -90,7 +92,7 @@ export default function CableNetwork() {
       transparent: true,
       opacity: 0.9,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       fog: false,
       toneMapped: false,
       blending: THREE.AdditiveBlending,
@@ -176,7 +178,7 @@ export default function CableNetwork() {
       uniforms: { uTime: { value: 0 }, uColor: { value: C_GLITTER } },
       transparent: true,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       blending: THREE.AdditiveBlending,
       fog: false,
       toneMapped: false,

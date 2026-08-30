@@ -30,6 +30,7 @@ export default function Substation() {
       rail: mkAdd({ color: C_CORE, opacity: 0.55 }),
       // 描边层：depthTest:false + renderOrder 置顶（见上注释：与 dark 体块同面深度会被平局覆盖）；纯白 alpha 细线，非 addi混合
       edge: new THREE.LineBasicMaterial({ color: '#eaf9ff', transparent: true, opacity: 0.92, depthTest: false, depthWrite: false, fog: false, toneMapped: false }),
+      edgeHi: new THREE.LineBasicMaterial({ color: '#f4fdff', transparent: true, opacity: 1.0, depthTest: false, depthWrite: false, fog: false, toneMapped: false }),
       bush: mkAdd({ color: C_EDGE, opacity: 0.7 }),
     }
   }, [])
@@ -38,7 +39,8 @@ export default function Substation() {
   // 晶格描边（任务#6）：主体体块EdgesGeometry硬边，强化"全息线稿"语言
   const edges = useMemo(() => ({
     platform: new THREE.EdgesGeometry(new THREE.BoxGeometry(W + 40, 2.4, D + 40), 24),
-    ctrl: new THREE.EdgesGeometry(new THREE.BoxGeometry(26, 11, 14), 24),
+    ctrl: new THREE.EdgesGeometry(new THREE.BoxGeometry(36, 12, 16), 24),
+    roof: new THREE.EdgesGeometry(new THREE.BoxGeometry(37.2, 0.5, 17.2), 24),
     trans: new THREE.EdgesGeometry(new THREE.CylinderGeometry(5.8, 5.8, 13, 10, 1), 30),
     gate: new THREE.EdgesGeometry(new THREE.BoxGeometry(33.6, 1.1, 1.1), 24),
     leg: new THREE.EdgesGeometry(new THREE.BoxGeometry(1.2, H, 1.2), 24),
@@ -65,10 +67,18 @@ export default function Substation() {
         </mesh>
       ))}
 
-      {/* 主控楼 + 设备间（暗芯剪影 + 玻璃面） */}
-      <mesh position={[-W / 2 + 14, 5.5, -D / 2 + 8]} material={mats.dark}><boxGeometry args={[26, 11, 14]} /></mesh>
-      <mesh position={[-W / 2 + 14, 5.5, -D / 2 + 8]} material={mats.lattice}><boxGeometry args={[26.2, 11.2, 14.2, 3, 2, 2]} /></mesh>
-      <lineSegments geometry={edges.ctrl} material={mats.edge} position={[-W / 2 + 14, 5.5, -D / 2 + 8]} renderOrder={7} />
+      {/* 主控楼（2026-08-29 可读性修正）：真实 220kV 主控通信楼约 36×16m；
+          底座坐在平台面上（顶 y=2.4）而非埋进台体；补接原"玻璃面"材质——
+          之前只写了注释没挂 mesh，这就是"长方体外形看不到"的直接原因；
+          描边换高亮线（alpha 1.0），中远景也能读出体块。 */}
+      <group position={[-W / 2 + 17, 2.4, -D / 2 + 10]}>
+        <mesh position={[0, 6, 0]} material={mats.dark}><boxGeometry args={[36, 12, 16]} /></mesh>
+        <mesh position={[0, 6, 0]} material={mats.glass}><boxGeometry args={[36.4, 12.4, 16.4]} /></mesh>
+        <mesh position={[0, 6, 0]} material={mats.lattice}><boxGeometry args={[36.2, 12.2, 16.2, 4, 2, 2]} /></mesh>
+        <lineSegments geometry={edges.ctrl} material={mats.edgeHi} position={[0, 6, 0]} renderOrder={8} />
+        {/* 女儿墙压顶：顶部细环让"楼顶"读得出来 */}
+        <lineSegments geometry={edges.roof} material={mats.edgeHi} position={[0, 12.15, 0]} renderOrder={8} />
+      </group>
 
       {/* 主变 ×3 + 套管束（不再是"圆柱顶球"） */}
       {[-34, -4, 26].map((dx, i) => (
