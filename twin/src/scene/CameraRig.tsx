@@ -5,24 +5,18 @@ import * as THREE from 'three'
 import { CAM, FARM } from './terrainUtil'
 import { useSim } from '../state/simStore'
 import {
-  buildIntroProfile, BOOST_TABLE,
-  CAMERA_NODES, LOOK_NODES, CAMERA_PATH, LOOK_PATH, INTRO_END,
+  CAMERA_PATH, LOOK_PATH, INTRO_END,
 } from './introProfile'
 
 // ============================================================================
-// 开场巡航 + 机位书签 + 跳过（C5 修复）
+// 开场巡航 + 机位书签 + 自由飞行（丝滑无抖动版）
 // ----------------------------------------------------------------------------
-//  · 34s 运镜保留（对位原宣传片）。速度剖面由 introProfile.ts 表驱动：
-//    直线加速 / 弯道减速环绕、13 段变速（~2.6s 一次方向反转）、
-//    倍率 0.42~1.75、bank 侧倾 ≤6.2°、fov 随速 47→51.5；
-//  · 修复前 5 秒黑屏闪跳：消除垂直奇异点与 NaN，平滑入场俯冲轨迹；
-//  · 开场期间禁用 OrbitControls 抢镜与 polarAngle 限制，结束后无缝交接；
-//  · 开场/自由飞交接与松手：InertiaPlugin 语义——track 速度 →
-//    指数滑行（τ=0.3s）减速停止，不再硬切（coast）；
-//  · WASD 自由飞：惯性速度向量（按压 0.22s 指数爬升 / 松手 0.9s 滑行）；
-//  · 书签机位（Phase 4 最小集）：键 1/2/3 = 全景 / 近排 / 升压站；
-//    平滑过渡 1.2s（缓入缓出），期间冻结巡航。
-//  · ?cam=方位角,俯仰角,距离[,tx,ty,tz] 调试机位仅在 DEV 或 ?debug=1 生效。
+//  · 34s + 9s 环绕全局单一时间基（ease 缓入缓出，C1 连续，无停顿、无摆动、无抖动）；
+//  · 消除前 5 秒黑屏与 180 度翻转：高空俯冲注视点稳定朝向风场中轴，远离垂直奇异点；
+//  · 巡航期间禁用 OrbitControls 抢镜；巡航/环绕结束后平滑交接；
+//  · 保持视平线稳定，移除造成摇晃抖动的侧倾(bank)与速度阶跃；
+//  · 书签机位：键 1/2/3 = 全景 / 近排 / 升压站；
+//  · WASD 自由飞行支持。
 // ============================================================================
 
 const CAM_BOOKMARKS = [
@@ -33,39 +27,16 @@ const CAM_BOOKMARKS = [
 
 const ORBIT_DUR = 9
 const INTRO_TOTAL = INTRO_END + ORBIT_DUR
-const ORBIT_A0 = Math.atan2(168, 76)              // 原终点方位（后侧）
-const ORBIT_A1 = THREE.MathUtils.degToRad(268)    // 叶轮正前方（-92°+360，取递增方向绕行）
+const PATH_FRAC = INTRO_END / INTRO_TOTAL
+const ORBIT_A0 = Math.atan2(168, 76)
+const ORBIT_A1 = THREE.MathUtils.degToRad(268)
 const ORBIT_R0 = Math.hypot(76, 168)
 const ORBIT_R1 = 196
 const ORBIT_Y0 = 56
 const ORBIT_Y1 = 66
-
-// —— 第 24 轮：速度剖面（模块级一次性构建，确定性）——
-const PROFILE = buildIntroProfile(CAMERA_PATH, INTRO_END, 170, 40, 400, BOOST_TABLE)
-// 收尾环绕角速度：出口匹配（巡航终点速度 × 切向对齐度 / R0），终点缓停
-const ORBIT_DTAN = new THREE.Vector3(-Math.sin(ORBIT_A0), 0, Math.cos(ORBIT_A0))
-const exitAlign = Math.max(0.25, ORBIT_DTAN.dot(PROFILE.exitTangent.clone().setY(0).normalize()))
-const ORBIT_W0 = THREE.MathUtils.clamp((PROFILE.vExit * exitAlign) / ORBIT_R0, 0.10, 0.60)
-const ORBIT_W1 = 0.10
-const ORBIT_DANG = ORBIT_A1 - ORBIT_A0
-function orbitAngle(e: number): number {
-  const h10 = e * e * e - 2 * e * e + e
-  const h01 = -2 * e * e * e + 3 * e * e
-  const h11 = e * e * e - e * e
-  return ORBIT_A0 + h10 * (ORBIT_W0 * ORBIT_DUR) + h01 * ORBIT_DANG + h11 * (ORBIT_W1 * ORBIT_DUR)
-}
-function orbitOmega(e: number): number {
-  if (e <= 0.002) return ORBIT_W0
-  if (e >= 0.998) return ORBIT_W1
-  return (orbitAngle(e + 0.002) - orbitAngle(e - 0.002)) / (ORBIT_DUR * 0.004)
-}
 const HUB = new THREE.Vector3(FARM[6].x, 0, FARM[6].z)
 
 const ease = (t: number) => t * t * (3 - 2 * t)
-const smooth01 = (x: number) => {
-  const t = THREE.MathUtils.clamp(x, 0, 1)
-  return t * t * (3 - 2 * t)
-}
 
 const DEBUG_ALLOWED = (typeof import.meta !== 'undefined' && import.meta.env?.DEV === true)
   || (typeof location !== 'undefined' && new URLSearchParams(location.search).has('debug'))
@@ -85,29 +56,13 @@ const DEBUG_CAM = (() => {
 const NO_INTRO = typeof location !== 'undefined'
   && (new URLSearchParams(location.search).has('intro0') || (DEBUG_ALLOWED && new URLSearchParams(location.search).get('intro') === '0'))
 
-// —— 惯性参数（InertiaPlugin 语义：track → 指数滑行）——
-const COAST_TAU = 0.3      // 交接滑行时间常数 (s)
-const COAST_MAX_T = 1.5    // 最长滑行 (s)
-const COAST_MAX_DRIFT = 120 // 最大漂移 (m)，防穿几何
-const FLY_TAU_ON = 0.22    // WASD 按压爬升 (s)
-const FLY_TAU_OFF = 0.9    // WASD 松手滑行 (s)
-
 export default function CameraRig() {
   const controlsRef = useRef<any>(null)
   const { camera } = useThree()
   const introStart = useRef<number | null>(null)
   const bookmark = useRef<{ from: THREE.Vector3; fromT: THREE.Vector3; to: THREE.Vector3; toT: THREE.Vector3; t0: number } | null>(null)
 
-  // —— 第 24 轮：惯性状态 ——
-  // 巡航中 track 的速度（位置/注视点），供 coast 与 WASD 交接
-  const vTrack = useRef(new THREE.Vector3())
-  const vTgtTrack = useRef(new THREE.Vector3())
-  const prevPos = useRef(new THREE.Vector3())
-  const prevTgt = useRef(new THREE.Vector3())
-  const coast = useRef<{ p0: THREE.Vector3; t0: THREE.Vector3; v: THREE.Vector3; vt: THREE.Vector3; t0clk: number } | null>(null)
-  const flyV = useRef(new THREE.Vector3())
-
-  // WASD 飞行输入（任务#6）：按住即进入自由飞行；intro 中按飞行键=跳过+起飞
+  // WASD 自由飞行输入
   const keys = useRef<Set<string>>(new Set())
   useEffect(() => {
     const FLY = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'Space'])
@@ -179,7 +134,7 @@ export default function CameraRig() {
       return
     }
 
-    // 书签过渡
+    // 书签机位平滑过渡
     const bm = bookmark.current
     if (bm) {
       if (ctl) ctl.enabled = false
@@ -210,80 +165,22 @@ export default function CameraRig() {
       return
     }
 
-    // —— 惯性滑行（coast）——开场/跳过 到 自由轨道的交接
-    // InertiaPlugin 语义：track 到的速度按 exp(-t/τ) 衰减积分，无缝减速停止
-    const co = coast.current
-    if (co) {
-      if (ctl) ctl.enabled = false
-      // 按任意飞行键 = 立即接管（取消滑行）
-      if (keys.current.size > 0) {
-        coast.current = null
-        useSim.getState().skipIntro()
-        flyV.current.copy(co.v) // 把滑行速度直接交给 WASD 惯性
-        if (ctl) {
-          ctl.enabled = true
-          ctl.target.copy(co.t0)
-          ctl.update()
-        }
-        return
-      }
-      const tc = state.clock.elapsedTime - co.t0clk
-      const k = 1 - Math.exp(-tc / COAST_TAU)
-      const off = COAST_TAU * k
-      const drift = co.v.length() * off
-      const p = new THREE.Vector3(
-        co.p0.x + co.v.x * off,
-        Math.max(14, co.p0.y + co.v.y * off),
-        co.p0.z + co.v.z * off,
-      )
-      const tg = new THREE.Vector3(
-        co.t0.x + co.vt.x * off,
-        co.t0.y + co.vt.y * off,
-        co.t0.z + co.vt.z * off,
-      )
-      camera.position.copy(p)
-      camera.lookAt(tg)
-      const vNow = co.v.length() * Math.exp(-tc / COAST_TAU)
-      if (tc >= COAST_MAX_T || vNow < 5 || drift >= COAST_MAX_DRIFT) {
-        coast.current = null
-        useSim.getState().skipIntro()
-        if (ctl) {
-          ctl.enabled = true
-          ctl.target.copy(tg)
-          ctl.update()
-        }
-      }
-      return
-    }
-
     if (s.introDone) {
       if (ctl) ctl.enabled = true
-      // ---- 自由飞行（惯性速度）：W/S 沿视线，A/D 横移，Space/C 升降，Shift=加速 ----
+      // WASD 自由飞行
       const k = keys.current
       const fwd = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0)
       const strafe = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0)
       const lift = (k.has('Space') ? 1 : 0) - (k.has('KeyC') ? 1 : 0)
       if (fwd || strafe || lift) {
-        const maxV = (k.has('ShiftLeft') || k.has('ShiftRight') ? 620 : 240)
+        const v = (k.has('ShiftLeft') || k.has('ShiftRight') ? 620 : 240) * Math.min(0.05, delta)
         const dir = new THREE.Vector3()
         camera.getWorldDirection(dir)
         const right = new THREE.Vector3().crossVectors(dir, camera.up).normalize()
-        const des = new THREE.Vector3()
-        des.addScaledVector(dir, fwd)
-        des.addScaledVector(right, strafe)
-        des.y += lift * 0.8
-        des.normalize().multiplyScalar(maxV)
-        // 按压：指数爬升（τ=0.22s）——不再瞬达
-        flyV.current.lerp(des, 1 - Math.exp(-Math.min(delta, 0.1) / FLY_TAU_ON))
-      } else if (flyV.current.lengthSq() > 1) {
-        // 松手：指数滑行（τ=0.9s）——InertiaPlugin inertia:"auto" 的落地
-        flyV.current.multiplyScalar(Math.exp(-Math.min(delta, 0.1) / FLY_TAU_OFF))
-        if (flyV.current.lengthSq() < 2.25) flyV.current.set(0, 0, 0)
-      }
-      const fly = flyV.current
-      if (fly.lengthSq() > 0) {
-        const dt = Math.min(delta, 0.1)
-        const mv = fly.clone().multiplyScalar(dt)
+        const mv = new THREE.Vector3()
+        mv.addScaledVector(dir, fwd * v)
+        mv.addScaledVector(right, strafe * v)
+        mv.y += lift * v * 0.8
         const ny = camera.position.y + mv.y
         if (ny > 14 && ny < 4600) {
           camera.position.add(mv)
@@ -297,81 +194,52 @@ export default function CameraRig() {
       return
     }
 
-    // 巡航期间由 CameraRig 独占控制相机，禁用 OrbitControls 干扰与夹角约束
+    // 巡航期间独占控制相机，禁用 OrbitControls 干扰与夹角约束
     if (ctl) ctl.enabled = false
 
     const t0 = state.clock.elapsedTime
     if (introStart.current === null) {
       introStart.current = t0
-      prevPos.current.copy(CAMERA_NODES[0])
-      prevTgt.current.copy(LOOK_NODES[0])
     }
     const el = t0 - introStart.current
 
-    // —— track：本帧速度（供 coast 交接），带 0.5 平滑去帧时抖动 ——
-    const dtc = Math.min(Math.max(delta, 0.001), 0.05)
-    const vNow = camera.position.clone().sub(prevPos.current).divideScalar(dtc)
-    vTrack.current.lerp(vNow, 0.5)
+    // 单一全局时间基：整个运镜一阶连续，首尾自然缓入缓出，全程丝滑无顿挫
+    const u = ease(Math.min(1, el / INTRO_TOTAL))
 
-    if (el < INTRO_END) {
-      // —— 巡航段：表驱动速度（直线加速 / 弯道减速 / 13 段 boost）——
-      const st = PROFILE.lookup(el)
-      const p = CAMERA_PATH.getPointAt(st.frac)
-      const tg = LOOK_PATH.getPointAt(st.frac)
-      camera.position.copy(p)
-      camera.lookAt(tg)
-      // 转弯侧倾（≤6.2°，克制）：右转(signedK>0)→右倾→rotateZ 取负
-      camera.rotateZ(-st.bank)
-      const perspective = camera as THREE.PerspectiveCamera
-      // 速度感 fov + 开场 3s 广角俯冲（54→）
-      perspective.fov = st.fov + 6 * (1 - smooth01(Math.min(1, el / 3)))
-      perspective.updateProjectionMatrix()
-
-      const vTgtNow = tg.clone().sub(prevTgt.current).divideScalar(dtc)
-      vTgtTrack.current.lerp(vTgtNow, 0.5)
-      prevTgt.current.copy(tg)
-    } else {
-      // —— 收尾环绕：Hermite 角轨迹，出口速度匹配接管 ——
-      const e = Math.min(1, (el - INTRO_END) / ORBIT_DUR)
-      const ang = orbitAngle(e)
-      const om = orbitOmega(e)
-      const rad = THREE.MathUtils.lerp(ORBIT_R0, ORBIT_R1, smooth01(e))
-      const hubY = THREE.MathUtils.lerp(92, 96, e)
+    if (u >= PATH_FRAC) {
+      // —— 收尾环绕：从后侧经西侧绕到叶轮正面 ——
+      const e = (u - PATH_FRAC) / (1 - PATH_FRAC)
+      const ang = THREE.MathUtils.lerp(ORBIT_A0, ORBIT_A1, e)
+      const rad = THREE.MathUtils.lerp(ORBIT_R0, ORBIT_R1, e)
+      const hub = new THREE.Vector3(HUB.x, THREE.MathUtils.lerp(92, 96, e), HUB.z)
       camera.position.set(
         HUB.x + Math.cos(ang) * rad,
         THREE.MathUtils.lerp(ORBIT_Y0, ORBIT_Y1, e),
         HUB.z + Math.sin(ang) * rad,
       )
-      const hub = new THREE.Vector3(HUB.x, hubY, HUB.z)
       camera.lookAt(hub)
-      // 环绕侧倾：a_lat = ω²R 同映射；起始 0.8s 与巡航末端 roll 交叉淡化
-      const aLat = om * om * rad
-      let bankOrbit = 0.108 * Math.sqrt(THREE.MathUtils.clamp((aLat - 1.5) / 50, 0, 1))
-      const pathExitBank = -PROFILE.lookup(INTRO_END).bank
-      bankOrbit = THREE.MathUtils.lerp(pathExitBank, bankOrbit, smooth01(Math.min(1, e / 0.09)))
-      camera.rotateZ(bankOrbit)
       const pO = camera as THREE.PerspectiveCamera
-      const span = Math.max(PROFILE.vMax - PROFILE.vMin, 1e-3)
-      pO.fov = 47 + 4.5 * smooth01((om * rad - PROFILE.vMin) / span)
+      pO.fov = 47
       pO.updateProjectionMatrix()
-
-      const vTgtNow = hub.clone().sub(prevTgt.current).divideScalar(dtc)
-      vTgtTrack.current.lerp(vTgtNow, 0.5)
-      prevTgt.current.copy(hub)
-
-      if (el >= INTRO_TOTAL) {
-        // 收尾完成 → 惯性滑行进自由轨道（近悬停，漂移 <10m）
-        coast.current = {
-          p0: camera.position.clone(),
-          t0: hub.clone(),
-          v: vTrack.current.clone(),
-          vt: vTgtTrack.current.clone(),
-          t0clk: t0,
+      if (el >= INTRO_TOTAL && !useSim.getState().introDone) {
+        useSim.getState().skipIntro()
+        if (ctl) {
+          ctl.enabled = true
+          ctl.target.copy(hub)
+          ctl.update()
         }
       }
+      return
     }
 
-    prevPos.current.copy(camera.position)
+    const progress = u / PATH_FRAC
+    const p = CAMERA_PATH.getPoint(progress)
+    const tg = LOOK_PATH.getPoint(progress)
+    camera.position.copy(p)
+    camera.lookAt(tg)
+    const perspective = camera as THREE.PerspectiveCamera
+    perspective.fov = THREE.MathUtils.lerp(52, 47, progress)
+    perspective.updateProjectionMatrix()
   })
 
   return null
