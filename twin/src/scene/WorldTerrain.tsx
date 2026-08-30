@@ -17,6 +17,9 @@ import { useSim } from '../state/simStore'
 //   · 波前沿风流增亮写入 totalEmissiveRadiance（青白单色相，克制）；
 //   · 振幅 ±6.6m 主涌 + ±2.3m 侧涌，传播方向与 windAt 同风源（地面=风向仪）。
 // 高程语义不变：terrainHeight ×0.58 + 26m 台地量化 ×0.42 + 逐面 ±3.2m 抬沉。
+// 第 23 轮（视觉精修 pass）：晶面明度收敛（逐面差 0.09→0.07、均值 −0.02）
+// + 片元空气透视（随 vD 混向深雾蓝，封顶 55%）——只动视觉层，
+// 高程/波浪位移/贴地基准/阴影接收全部原样。
 // ============================================================
 
 function hash2(ix: number, iz: number): number {
@@ -47,7 +50,9 @@ export default function WorldTerrain() {
       const h = hash2(Math.round(cx / CELL), Math.round(cz / CELL))
       const lift = (h - 0.5) * 6.4
       // 第 19 轮：逐面明暗差 0.24→0.09，整体色彩变化变小（用户：地面颜色过于惹眼）
-      const shade = 0.90 + hash2(Math.round(cz / CELL) + 57, Math.round(cx / CELL) - 31) * 0.09
+      // 第 23 轮：明暗带再收窄 0.09→0.07、均值再降 0.90→0.88——
+      // 地面整体在明度层级里下沉，让出九机线稿的焦点权重
+      const shade = 0.88 + hash2(Math.round(cz / CELL) + 57, Math.round(cx / CELL) - 31) * 0.07
       for (let k = 0; k < 3; k++) {
         np.setY(f + k, np.getY(f + k) + lift)
         colors[(f + k) * 3] = shade
@@ -106,7 +111,14 @@ export default function WorldTerrain() {
           '#include <normal_fragment_begin>',
           /* glsl */ `#include <normal_fragment_begin>
   float upFace = abs(normal.y);
-  diffuseColor.rgb *= mix(0.30, 1.0, smoothstep(0.0, 0.62, upFace));`,
+  diffuseColor.rgb *= mix(0.30, 1.0, smoothstep(0.0, 0.62, upFace));
+  // 第 23 轮：空气透视（与场景 FogExp2 互补）。
+  // 随相机水平距离把晶面漫反射混向深雾蓝色调：面间明暗台阶被抹平、
+  // 中远景整体下沉——近排最亮、中排次之、远排收进雾色，
+  // 九机阵列的纵深层次由地面明度梯度直接承担。
+  // 混合目标非纯黑（保留西北远山剪影可读），权重 0.55 封顶。
+  float air = smoothstep(420.0, 2800.0, vD);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.024, 0.052, 0.082), 0.55 * air);`,
         )
         .replace(
           '#include <emissivemap_fragment>',
@@ -119,7 +131,7 @@ export default function WorldTerrain() {
   totalEmissiveRadiance += vec3(0.030, 0.070, 0.088) * flow * uGlow * far * mix(0.18, 1.0, smoothstep(0.0, 0.62, abs(normal.y)));`,
         )
     }
-    m.customProgramCacheKey = () => 'terrain-wave-v6'
+    m.customProgramCacheKey = () => 'terrain-wave-v7'
     m.userData.u = u
     return { geo: ng, mat: m }
   }, [])
