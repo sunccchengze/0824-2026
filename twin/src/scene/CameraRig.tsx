@@ -276,7 +276,10 @@ export default function CameraRig() {
         flyV.current.copy(co.v) // 把滑行速度直接交给 WASD 惯性
         return
       }
-      const tc = state.clock.elapsedTime - co.t0clk
+      // coast 同样用帧间增量（而非绝对 elapsedTime）：吸收目标结束后的
+      // 首帧 Shader/纹理提交停顿，避免滑行 tc 一次跳数秒导致“减速即瞬移”。
+      introClock.current += Math.min(Math.max(delta, 0.001), 0.1)
+      const tc = introClock.current - co.t0clk
       const k = 1 - Math.exp(-tc / COAST_TAU)
       const off = COAST_TAU * k
       const drift = co.v.length() * off
@@ -414,7 +417,7 @@ export default function CameraRig() {
           t0: hub.clone(),
           v: vTrack.current.clone(),
           vt: vTgtTrack.current.clone(),
-          t0clk: t0,
+          t0clk: introClock.current,
         }
       }
     }
