@@ -55,6 +55,16 @@ const LOOK_NODES = [
 const CAMERA_PATH = new THREE.CatmullRomCurve3(CAMERA_NODES, false, 'centripetal', 0.38)
 const LOOK_PATH = new THREE.CatmullRomCurve3(LOOK_NODES, false, 'centripetal', 0.38)
 const INTRO_END = 34
+// 第 15 轮：原巡航终点落在 T07 背面（机头基向朝北迎风 → 转子正面朝 -z），
+// 故在 34s 之后补一段 7s 环绕，绕 T07 从后侧 (+x,+z) 摇到正前方偏左 (-z)，
+// 结束时看到的是叶轮正面。半径/高度同步微调，保持构图不穿模。
+const ORBIT_DUR = 7
+const ORBIT_A0 = Math.atan2(168, 76)              // 原终点方位（后侧）
+const ORBIT_A1 = THREE.MathUtils.degToRad(-92)    // 叶轮正前方（略偏 2°，避免完全对称呆板）
+const ORBIT_R0 = Math.hypot(76, 168)
+const ORBIT_R1 = 196
+const ORBIT_Y0 = 56
+const ORBIT_Y1 = 66
 
 const ease = (t: number) => t * t * (3 - 2 * t)
 
@@ -203,7 +213,29 @@ export default function CameraRig() {
 
     const t0 = state.clock.elapsedTime
     if (introStart.current === null) introStart.current = 0
-    const progress = ease(Math.min(1, (t0 - introStart.current) / INTRO_END))
+    const el = t0 - introStart.current
+    if (el > INTRO_END) {
+      // —— 收尾环绕：绕 T07 转到叶轮正面 ——
+      const k = Math.min(1, (el - INTRO_END) / ORBIT_DUR)
+      const e = ease(k)
+      const ang = THREE.MathUtils.lerp(ORBIT_A0, ORBIT_A1, e)
+      const rad = THREE.MathUtils.lerp(ORBIT_R0, ORBIT_R1, e)
+      const hub = new THREE.Vector3(FARM[6].x, THREE.MathUtils.lerp(92, 96, e), FARM[6].z)
+      camera.position.set(
+        FARM[6].x + Math.cos(ang) * rad,
+        THREE.MathUtils.lerp(ORBIT_Y0, ORBIT_Y1, e),
+        FARM[6].z + Math.sin(ang) * rad,
+      )
+      camera.lookAt(hub)
+      const ctlO = controlsRef.current
+      if (ctlO) { ctlO.target.copy(hub); ctlO.update() }
+      const pO = camera as THREE.PerspectiveCamera
+      pO.fov = 47
+      pO.updateProjectionMatrix()
+      if (k >= 1 && !useSim.getState().introDone) useSim.getState().skipIntro()
+      return
+    }
+    const progress = ease(Math.min(1, el / INTRO_END))
     const p = CAMERA_PATH.getPoint(progress)
     const tg = LOOK_PATH.getPoint(progress)
     camera.position.copy(p)
@@ -216,7 +248,7 @@ export default function CameraRig() {
     const perspective = camera as THREE.PerspectiveCamera
     perspective.fov = THREE.MathUtils.lerp(54, 47, progress)
     perspective.updateProjectionMatrix()
-    if (progress >= 1 && !useSim.getState().introDone) useSim.getState().skipIntro()
+
   })
 
   return null
