@@ -61,7 +61,10 @@ export interface SimState {
 const ZERO_YAW = new Array<number>(N_UNITS).fill(0)
 
 export const useSim = create<SimState>((set, get) => ({
-  tHours: 10,
+  // 默认进入时刻改为 t=6（日出后高清高功率段）：与《日间氛围_参考基线》
+  // 06:12 帧一致，HUD 首屏即展示 ~14MW 高功率 + 低角度晨光最长光影梯度；
+  // 避免默认 t=10 落在日内风速低谷（~5.6MW）让人误以为“功率被降低”。
+  tHours: 6,
   playing: true,
   togglePlay: () => set((s) => ({ playing: !s.playing })),
   seek: (h) => set({ tHours: ((h % 24) + 24) % 24 }),
@@ -130,6 +133,10 @@ export function startSimClock() {
     const dt = (now - last) / 1000
     last = now
     const s = useSim.getState()
+    // 开场运镜期间（introDone=false）不推进仿真时间：
+    // 否则开场 34~43s（≈大半天）里 HUD 会从默认高功率飞快滑到日内低谷，
+    // 用户开场一结束就看到“功率下降”。开场结束后恢复播放（真实 50s=24h）。
+    if (!s.introDone) return
     if (s.playing && !s.fatal) {
       useSim.setState({ tHours: (s.tHours + dt * (24 / 50)) % 24 })
     }
