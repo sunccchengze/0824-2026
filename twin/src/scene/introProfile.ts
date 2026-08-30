@@ -1,7 +1,8 @@
 import * as THREE from 'three'
+import { FARM } from './terrainUtil.ts'
 
 // ============================================================================
-// 开场巡航速度剖面（第 24 轮：-SKILL- 仓库 GSAP Inertia 技能的原生移植）
+// 开场巡航速度剖面与路径真值源
 // ----------------------------------------------------------------------------
 // 技能来源：sunccchengze/-SKILL- @ arena/01a048e7-skill
 //   skills/community/gsap-skills/skills/gsap-plugins/SKILL.md（Inertia / MotionPath 两节）
@@ -15,6 +16,42 @@ import * as THREE from 'three'
 //   · 积分得 时间→弧长 映射表（总时长钉 34s，确定性、可 A/B、截图可复现）；
 //   · bank = 侧向加速度模型 √ 映射（≤6.2°，克制）；fov 随速度 47→51.5。
 // ============================================================================
+
+export const CAMERA_NODES = [
+  new THREE.Vector3(-100, 1500, -200), // 0: 高空起始点：俯瞰风场全局
+  new THREE.Vector3(-100, 850, -320),  // 1: 俯冲推进
+  new THREE.Vector3(-100, 320, -380),  // 2: 俯冲掠过场区上空
+  new THREE.Vector3(-100, 280, -160),  // 3: 低空后掠拉开
+  new THREE.Vector3(-100, 340, 240),   // 4: 抬头拉远
+  new THREE.Vector3(-20, 420, 650),    // 5: 进全景过渡
+  new THREE.Vector3(60, 480, 990),     // 6: 全景构图机位
+  new THREE.Vector3(120, 470, 900),    // 7: 全景缓行
+  new THREE.Vector3(FARM[2].x + 145, 210, FARM[2].z - 160), // 8: 快速前推至 T03
+  new THREE.Vector3(FARM[2].x + 160, 220, FARM[2].z - 110), // 9: T03 处转头
+  new THREE.Vector3(FARM[4].x + 100, 130, FARM[4].z + 105), // 10: 沿对角线穿 T05
+  new THREE.Vector3(FARM[6].x + 145, 86, FARM[6].z + 120),  // 11: 接近 T07
+  new THREE.Vector3(FARM[6].x + 76, 56, FARM[6].z + 168),   // 12: T07 前低机位终点
+]
+
+export const LOOK_NODES = [
+  new THREE.Vector3(-100, 60, -1100),  // 0: 俯瞰中远排机组
+  new THREE.Vector3(-100, 60, -980),   // 1: 俯冲注视远排
+  new THREE.Vector3(-100, 75, -860),   // 2: 掠过中排
+  new THREE.Vector3(-100, 85, -700),   // 3: 望向中排机组
+  new THREE.Vector3(-40, 60, -520),    // 4: 望向近排与场区
+  new THREE.Vector3(0, 22, -340),      // 5: 进全景过渡注视
+  new THREE.Vector3(0, 22, -340),      // 6: 全景中心 (CAM.target)
+  new THREE.Vector3(0, 22, -340),      // 7: 全景中心
+  new THREE.Vector3(FARM[2].x, 96, FARM[2].z), // 8: T03
+  new THREE.Vector3(FARM[4].x, 96, FARM[4].z), // 9: T05
+  new THREE.Vector3(FARM[6].x, 98, FARM[6].z), // 10: T07
+  new THREE.Vector3(FARM[6].x, 96, FARM[6].z), // 11: T07
+  new THREE.Vector3(FARM[6].x, 92, FARM[6].z), // 12: T07
+]
+
+export const CAMERA_PATH = new THREE.CatmullRomCurve3(CAMERA_NODES, false, 'centripetal', 0.38)
+export const LOOK_PATH = new THREE.CatmullRomCurve3(LOOK_NODES, false, 'centripetal', 0.38)
+export const INTRO_END = 34
 
 export interface IntroSample {
   frac: number      // 弧长分数 0..1

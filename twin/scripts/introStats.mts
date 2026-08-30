@@ -1,25 +1,7 @@
-// 第 24 轮：开场速度剖面定量验证（node 直接跑，与运行时同一份模块）
-import { buildIntroProfile, BOOST_TABLE } from '../src/scene/introProfile.ts'
-import * as THREE from 'three'
-import { FARM } from '../src/scene/terrainUtil.ts'
+// 开场速度剖面定量验证（node 直接跑，与运行时同一份模块与路径）
+import { buildIntroProfile, BOOST_TABLE, CAMERA_PATH } from '../src/scene/introProfile.ts'
 
-const NODES = [
-  new THREE.Vector3(-100, 1720, -640),
-  new THREE.Vector3(-100, 720, -640),
-  new THREE.Vector3(-100, 300, -640),
-  new THREE.Vector3(-100, 300, -520),
-  new THREE.Vector3(-100, 330, -200),
-  new THREE.Vector3(-100, 390, 250),
-  new THREE.Vector3(60, 480, 990),
-  new THREE.Vector3(120, 470, 900),
-  new THREE.Vector3(FARM[2].x + 145, 210, FARM[2].z - 160),
-  new THREE.Vector3(FARM[2].x + 160, 220, FARM[2].z - 110),
-  new THREE.Vector3(FARM[4].x + 100, 130, FARM[4].z + 105),
-  new THREE.Vector3(FARM[6].x + 145, 86, FARM[6].z + 120),
-  new THREE.Vector3(FARM[6].x + 76, 56, FARM[6].z + 168),
-]
-const path = new THREE.CatmullRomCurve3(NODES, false, 'centripetal', 0.38)
-const P = buildIntroProfile(path, 34, 170, 40, 400, BOOST_TABLE)
+const P = buildIntroProfile(CAMERA_PATH, 34, 170, 40, 400, BOOST_TABLE)
 const s = P.stats
 console.log('== 巡航段速度剖面（34s）==')
 console.log(`总长 ${s.len.toFixed(0)} m | 需均速 ${s.vMean.toFixed(1)} m/s | min ${s.vMin.toFixed(1)} | max ${s.vMax.toFixed(1)} m/s`)
