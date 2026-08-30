@@ -266,17 +266,22 @@ function buildHeavy(tq: number, unitYaw: number[], targetMW: number, wind?: Wind
       const temp = genTempC(di.powerKw / 5000, t, i)
       const mk = (level: 'warn' | 'crit', rule: string, zh: string, en: string, part: string) =>
         push({
-          key: (hashKey(rule) * 31 + Math.round(t * 60) + i * 7 + Math.round(Math.abs(di.yawErrDeg)) ) >>> 0,
+          // BUG-FIX：原式 hashKey(rule)*31 溢出 32 位后与其余项叠加，实测 9360 组
+          // (rule,机组,时刻,偏差) 只落到 432 个 key —— 确认一条告警会连带隐藏其它条。
+          // 改为按 (rule,机组) 唯一定 key，与 best Map 的去重口径一致。
+          key: hashKey(`${rule}|${di.id}`),
           level, rule, zh, en, tid: di.id, part, tStartH: t, minutesAgo: g * SCAN_MIN,
         })
       if (temp > 96) mk('crit', 'TEMP', '发电机绕组超温', 'Generator Winding Overtemp', '发电机')
       else if (temp > 93) mk('warn', 'TEMP', '发电机温度偏高', 'Generator Temp High', '发电机')
       if (Math.abs(di.yawErrDeg) > 24) mk('warn', 'YAWERR', '偏航对风偏差超限', 'Yaw Misalignment', '偏航系统')
     }
+    // BUG-FIX（下两条）：key 原先含 Math.round(t*60)，每个扫描周期都生成新 key，
+    // 用户"确认"过的告警下一 tick 又以新身份出现 —— 确认按钮等于无效。
     if (Math.abs(gridFrequency(c.totalMW, targetMW, t) - 50) > 0.12)
-      push({ key: hashKey('FREQ') + Math.round(t * 60), level: 'crit', rule: 'FREQ', zh: '并网点频率越限', en: 'Grid Frequency Deviation', tid: null, part: '并网点', tStartH: t, minutesAgo: g * SCAN_MIN })
+      push({ key: hashKey('FREQ'), level: 'crit', rule: 'FREQ', zh: '并网点频率越限', en: 'Grid Frequency Deviation', tid: null, part: '并网点', tStartH: t, minutesAgo: g * SCAN_MIN })
     if (c.derateFrac < 0.85)
-      push({ key: hashKey('DERATE') + Math.round(t * 60), level: 'warn', rule: 'DERATE', zh: `全场限功率运行（指令 ${Math.round(targetMW)} MW）`, en: 'Farm Output Curtailed', tid: null, part: '功率控制', tStartH: t, minutesAgo: g * SCAN_MIN })
+      push({ key: hashKey('DERATE'), level: 'warn', rule: 'DERATE', zh: `全场限功率运行（指令 ${Math.round(targetMW)} MW）`, en: 'Farm Output Curtailed', tid: null, part: '功率控制', tStartH: t, minutesAgo: g * SCAN_MIN })
   }
   // 当前活跃事件优先展示
   let activeCritNow = false
@@ -369,7 +374,9 @@ export function optimizeYaw(tHours: number, seedYaw: number[], wind?: WindOverri
       let best = measure(yaw)
       let bestV = cur
       for (const d of [-6, -4.5, -3, -1.5, 1.5, 3, 4.5, 6]) {
-        yaw[i] = Math.max(-35, Math.min(35, cur + d))
+        // BUG-FIX：原上限 ±35 超出滑杆量程 ±30，寻优后滑杆会"顶死在 30"
+        // 而 store 实存 34.5，HUD 显示与真实指令不符。收敛到同一量程。
+        yaw[i] = Math.max(-30, Math.min(30, cur + d))
         const v = measure(yaw)
         if (v > best + 1e-9) { best = v; bestV = yaw[i] }
       }

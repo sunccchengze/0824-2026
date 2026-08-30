@@ -109,10 +109,11 @@ export default function AirflowField() {
       const base = j * N_RING * N_SEG
       for (let r = 0; r < N_RING - 1; r++) {
         for (let kk = 0; kk < N_SEG; kk++) {
+          const kn = (kk + 1) % N_SEG // BUG-FIX：环周需闭合取模，原来 kk+1 在最后一段
           const a0 = base + r * N_SEG + kk
-          const a1 = a0 + 1
+          const a1 = base + r * N_SEG + kn
           const b0 = a0 + N_SEG
-          const b1 = b0 + 1
+          const b1 = a1 + N_SEG
           idx[t++] = a0; idx[t++] = b0; idx[t++] = a1
           idx[t++] = a1; idx[t++] = b0; idx[t++] = b1
         }
