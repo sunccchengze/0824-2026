@@ -246,7 +246,20 @@ export default function CameraRig() {
     // 会抹掉巡航的 bank 侧倾，且在 damping 下产生持续的“沉降”抖动。
     // 开场结束后再启用，交给用户拖拽/缩放。
     const ctlAny = controlsRef.current
-    if (ctlAny && ctlAny.enabled !== s.introDone) ctlAny.enabled = s.introDone
+    if (ctlAny) {
+      if (ctlAny.enabled !== s.introDone) {
+        // 关闭→启用 的交界：OrbitControls 内部球坐标在开场期间已 stale，
+        // 直接启用会在松开 damping 时产生一次“抬头/回弹”跳变。
+        // 这里先把它内部 target 同步到当前注视点并 update() 一次（等效 lookAt），
+        // 再启用，保证接管时相机朝向连续。
+        if (!ctlAny.enabled && s.introDone) {
+          const tgt = ctlAny.target ?? HUB
+          ctlAny.target.copy(tgt)
+          ctlAny.update()
+        }
+        ctlAny.enabled = s.introDone
+      }
+    }
     if (NO_INTRO && !s.introDone) {
       s.skipIntro()
       return
