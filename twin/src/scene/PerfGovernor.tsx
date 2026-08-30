@@ -17,6 +17,8 @@ export default function PerfGovernor() {
   const { gl } = useThree()
   const ema = useRef(16)
   const acc = useRef(0)
+  const frozen = useRef(false)
+  const introEndAt = useRef(0)
   const lock = useRef<string | null>(
     typeof location !== 'undefined'
       ? (new URLSearchParams(location.search).get('q') as 'low' | 'medium' | 'high' | null)
@@ -37,6 +39,16 @@ export default function PerfGovernor() {
     acc.current = 0
     const s = useSim.getState()
     if (!s.qualityAuto) return
+    // 开场运镜期间（以及结束后 4s）冻结画质自适应：
+    // 首段 shader 编译/PMREM 常见几秒高帧时，若立即 high→medium→low 连续降档，
+    // EffectComposer 与 Canvas dpr 会各重建一次，真机上正是“开场两次黑屏”的来源。
+    if (!s.introDone || performance.now() - introEndAt.current < 4000) {
+      if (!frozen.current && s.introDone) {
+        frozen.current = true
+        introEndAt.current = performance.now()
+      }
+      return
+    }
     const cur = ORDER.indexOf(s.quality)
     if (ema.current > 22 && cur > 0) {
       s.setQuality(ORDER[cur - 1] as 'low' | 'medium' | 'high')
