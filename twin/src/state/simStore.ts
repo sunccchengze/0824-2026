@@ -35,6 +35,8 @@ export interface SimState {
   resetYaw: () => void
 
   // 单机选择（矩阵点击 ↔ 3D 高亮 ↔ 信息卡）
+  airflow: boolean
+  setAirflow: (v: boolean) => void
   selected: number | null
   setSelected: (i: number | null) => void
 
@@ -92,6 +94,9 @@ export const useSim = create<SimState>((set, get) => ({
   },
   resetYaw: () =>
     set({ unitYaw: [...ZERO_YAW], optimizeNote: '偏航指令已复位：全场对风 0°（基准工况）', optimizeStamp: Date.now() }),
+
+  airflow: true,
+  setAirflow: (v: boolean) => set({ airflow: v }),
 
   selected: null,
   setSelected: (i) => set({ selected: i }),

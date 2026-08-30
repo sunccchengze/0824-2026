@@ -8,6 +8,7 @@ import LightRig from './scene/LightRig'
 import WorldTerrain from './scene/WorldTerrain'
 import SparkleGround from './scene/SparkleGround'
 import WindVeil from './scene/WindVeil'
+import AirflowField from './scene/AirflowField'
 import TurbineField from './scene/TurbineField'
 import CableNetwork from './scene/CableNetwork'
 import Substation from './scene/Substation'
@@ -116,6 +117,7 @@ export default function App() {
               <WorldTerrain />
               <SparkleGround count={4600} />
               <WindVeil />
+              <AirflowField />
               <CableNetwork />
               <Substation />
               <TurbineField />

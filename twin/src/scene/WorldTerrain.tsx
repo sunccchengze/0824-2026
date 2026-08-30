@@ -8,7 +8,7 @@ import { useSim } from '../state/simStore'
 // 朴素的地形表面：不再使用科技网格，也不使用泥土图片。
 // 地面只保留墨青色磨砂材质、细腻程序微表面和极弱的静态等高线质感。
 // 任务#11：碎晶"顺风流"层——逐面（aRnd）沿风向行波轻微起伏 + 波前增亮，
-// 既是风场指示器又活跃画面；振幅/速度都克制（贴地 2.2m 波、约 0.6Hz）。
+// 既是风场指示器又活跃画面；海浪基调：贴地 ±6.2m 主涌 + ±2.1m 侧波，周期 ~1s 级（放大后仍被 7.6km 地形稀释，不遮挡风机基座）。
 const DETAIL_VERT = /* glsl */ `
 varying vec3 vWorld;
 varying vec3 vN;
@@ -18,10 +18,14 @@ uniform float uTime;
 uniform vec2 uWind;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
-  float ph = dot(wp.xz, uWind) * 0.018 - uTime * 1.35 + aRnd * 2.4;
+  // 海浪式双列波：主涌顺风流推进（波长大、振幅 6.2m）+ 侧向中长波调制，
+  // 波峰线在脊前翻卷增亮——远看是整片"结冰海面"在随风起伏
+  float ph = dot(wp.xz, uWind) * 0.0105 - uTime * 2.15 + aRnd * 1.9;
   float wv = sin(ph) * 0.5 + 0.5;
-  wp.y += (wv - 0.4) * 2.2 * (0.5 + aRnd);
-  vW = wv;
+  float ph2 = dot(wp.xz, vec2(uWind.y, -uWind.x)) * 0.0068 + uTime * 1.05 + aRnd * 4.7;
+  float wv2 = sin(ph2) * 0.5 + 0.5;
+  wp.y += (wv - 0.42) * 6.2 * (0.55 + aRnd * 0.9) + (wv2 - 0.5) * 2.1;
+  vW = clamp(wv * 0.78 + wv2 * 0.22, 0.0, 1.0);
   vWorld = wp.xyz;
   vN = normalize(normalMatrix * normal);
   gl_Position = projectionMatrix * viewMatrix * wp;
@@ -70,7 +74,7 @@ void main() {
   color += vec3(0.008, 0.028, 0.038) * micro * 0.28;
   color += vec3(0.012, 0.042, 0.050) * contour * 0.22;
   // 波前顺风流光（青白，单一色相）
-  float flow = smoothstep(0.60, 0.97, vW);
+  float flow = smoothstep(0.54, 0.985, vW);
   color += vec3(0.030, 0.105, 0.140) * flow;
   float alpha = (0.12 + macro * 0.12 + grazing * 0.05 + contour * 0.045 + flow * 0.10) * distanceFade;
   gl_FragColor = vec4(color, alpha);

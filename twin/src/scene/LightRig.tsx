@@ -54,24 +54,30 @@ export default function LightRig() {
     const s = useSim.getState()
     // —— 连续仿真钟：与 startSimClock 同速率；暂停/跳变时吸附 store 值 ——
     if (tmp.simT < 0) tmp.simT = s.tHours
-    const gap = Math.abs(wrap24(s.tHours) - wrap24(tmp.simT))
-    if (!s.playing || gap > 0.6 || gap < -0) tmp.simT = s.tHours
+    // 循环距离（wrap 感知）：24:00→0:00 自然换日 gap≈0.048，不再误判为
+    // "跳变 23.95h"而吸附——那正是午夜画面卡一下的放大器
+    let g = wrap24(s.tHours) - wrap24(tmp.simT)
+    if (g > 12) g -= 24
+    if (g < -12) g += 24
+    if (!s.playing || Math.abs(g) > 0.6) tmp.simT = s.tHours
     else tmp.simT = wrap24(tmp.simT + Math.min(0.1, delta) * (24 / 50))
 
     const dn = dayNight(tmp.simT)
     // smoothstep 缓入晨昏，日出/日落有 2-3 秒（真实时间）的渐变而非突变
     const fd = dn.dayF * dn.dayF * (3 - 2 * dn.dayF)
+    const mf = dn.moonF * dn.moonF * (3 - 2 * dn.moonF)
     skyState.dayF = fd
     skyState.sunDir.set(...dn.sunDir)
     skyState.moonDir.set(...dn.moonDir)
     const night = 1 - fd
 
     if (sunRef.current) {
-      // 方向：太阳↔月亮按 fd 连续混合后归一化——过渡期光从地平掠过（长影）
+      // 方向：太阳权重 fd、月亮权重 mf 连续交叉——日落瞬间合光仍偏西（余晖），
+      // 入夜渐交棒月亮；两臂在晨昏交界同点（对日点），无方位跳变
       tmp.dir.set(
-        dn.sunDir[0] * fd + dn.moonDir[0] * night,
-        Math.max(0.045, dn.sunDir[1] * fd + dn.moonDir[1] * night),
-        dn.sunDir[2] * fd + dn.moonDir[2] * night,
+        dn.sunDir[0] * fd + dn.moonDir[0] * mf,
+        Math.max(0.045, dn.sunDir[1] * fd + dn.moonDir[1] * mf),
+        dn.sunDir[2] * fd + dn.moonDir[2] * mf,
       ).normalize()
       const R = 2600
       sunRef.current.position.set(TARGET.x + tmp.dir.x * R, TARGET.y + tmp.dir.y * R, TARGET.z + tmp.dir.z * R)

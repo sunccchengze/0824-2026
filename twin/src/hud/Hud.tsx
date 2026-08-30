@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSim, useFarmFrame } from '../state/simStore'
 import { FARM } from '../scene/terrainUtil'
 import { UNIT_NAMEPLATE, FARM_RATED_MW } from '../data/farmSim'
+import { ROTOR_D, WAKE_K, WAKE_DEFLECT } from '../data/turbinePhysics'
 
 // ================================================================
 // 未来能源数字孪生系统 —— 大屏 HUD（v3：全读数接演示数据契约）
@@ -17,14 +18,19 @@ import { UNIT_NAMEPLATE, FARM_RATED_MW } from '../data/farmSim'
 const SIZE = { w: 1920, h: 1080 }
 
 function useStageScale() {
-  const [scale, setScale] = useState(1)
+  const [dim, setDim] = useState({ scale: 1, h: SIZE.h })
   useEffect(() => {
-    const onR = () => setScale(Math.min(window.innerWidth / SIZE.w, window.innerHeight / SIZE.h))
+    // 宽度 1920 定标；设计高度随屏幕比例伸展（16:10→1200）——
+    // 消除旧版 min() 等比锁死导致的上下黑边与"底部被时间条遮挡"
+    const onR = () => {
+      const sc = window.innerWidth / SIZE.w
+      setDim({ scale: sc, h: Math.max(940, Math.round(window.innerHeight / sc)) })
+    }
     onR()
     window.addEventListener('resize', onR)
     return () => window.removeEventListener('resize', onR)
   }, [])
-  return scale
+  return dim
 }
 
 const f1 = (v: number) => v.toFixed(1)
@@ -35,9 +41,9 @@ const intFmt = (v: number) => Math.round(v).toLocaleString('en-US')
 const Badge = ({ k }: { k: '演示' | '代理' | '示意' }) => <span className={`evb evb-${k === '演示' ? 'd' : k === '代理' ? 'p' : 's'}`}>{k}</span>
 
 /* ---------- 通用面板 ---------- */
-function Panel({ title, en, badge, children, tall }: { title: string; en?: string; badge?: '演示' | '代理' | '示意'; children: ReactNode; tall?: boolean }) {
+function Panel({ title, en, badge, children, tall, cls }: { title: string; en?: string; badge?: '演示' | '代理' | '示意'; children: ReactNode; tall?: boolean; cls?: string }) {
   return (
-    <section className={`panel${tall ? ' tall' : ''}`}>
+    <section className={`panel${tall ? ' tall' : ''}${cls ? ` ${cls}` : ''}`}>
       <i className="c tl" /><i className="c tr" /><i className="c bl" /><i className="c br" />
       <i className="notch" />
       <header className="ptitle">
@@ -100,84 +106,93 @@ function Matrix() {
   )
 }
 
-/* ---------- 风况玫瑰（任务#1：16 扇区 × 风速分档堆叠，气象口径） ---------- */
+/* ---------- 风况雷达（用户定案：雷达扫描制，撤风玫瑰；数据同源） ---------- */
 const DIRS16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
-const ROSE_BIN_COLORS = ['rgba(62,124,164,.40)', 'rgba(86,178,224,.52)', 'rgba(126,222,255,.74)', 'rgba(226,249,255,.94)']
-const ROSE_BIN_LABELS = ['<6', '6-10', '10-14', '≥14 m/s']
 
 function Radar() {
   const frame = useFarmFrame()
-  const C = 118, R = 86, rIn = 11
-  const maxPct = Math.max(1, ...frame.rose)
-  const pol = (deg: number, r: number): [number, number] => [C + Math.cos((deg * Math.PI) / 180) * r, C + Math.sin((deg * Math.PI) / 180) * r]
-  const wedge = (a0: number, a1: number, ra: number, rb: number) => {
-    const [x0, y0] = pol(a0, ra); const [x1, y1] = pol(a1, ra)
-    const [x2, y2] = pol(a1, rb); const [x3, y3] = pol(a0, rb)
-    return `M${x0.toFixed(1)},${y0.toFixed(1)} L${x1.toFixed(1)},${y1.toFixed(1)} A${rb},${rb} 0 0 1 ${x2.toFixed(1)},${y2.toFixed(1)} L${x3.toFixed(1)},${y3.toFixed(1)} A${ra},${ra} 0 0 0 ${x0.toFixed(1)},${y0.toFixed(1)} Z`
-  }
-  const petals = frame.rosePct.flatMap((bins, i) => {
-    const center = -90 + i * 22.5
-    let acc = 0
-    return bins.map((p, b) => {
-      if (p < 0.1) return null
-      const ra = rIn + (R - rIn) * (acc / maxPct); acc += p
-      const rb = rIn + (R - rIn) * (acc / maxPct)
-      return <path key={`${i}-${b}`} d={wedge(center - 10.4, center + 10.4, ra, rb)} fill={ROSE_BIN_COLORS[b]} stroke="rgba(206,242,255,.22)" strokeWidth={0.5} />
-    })
-  })
-  const domI = frame.rose.indexOf(Math.max(...frame.rose))
+  const unitYaw = useSim((st) => st.unitYaw)
+  const airflow = useSim((st) => st.airflow)
+  const setAirflow = useSim((st) => st.setAirflow)
+  const C = 118, R = 96
+  const cx = FARM.reduce((a, f) => a + f.x, 0) / FARM.length
+  const cz = FARM.reduce((a, f) => a + f.z, 0) / FARM.length
+  const S = (R - 12) / 1150 // 场域缩比：±1150m → 雷达盘
   const fromDeg = ((frame.windFromDeg % 360) + 360) % 360
-  const ang = ((fromDeg - 90) * Math.PI) / 180
-  const [ax, ay] = pol(fromDeg - 90, R + 15)
-  const [hx, hy] = pol(fromDeg - 90, 15)
+  const th = (fromDeg * Math.PI) / 180
+  const fx = Math.sin(th), fz = Math.cos(th) // 风的去向（水平面）
+  const domI = Math.floor((fromDeg + 11.25) / 22.5) % 16
+  const blips = FARM.map((f, i) => {
+    const u = frame.units[i]
+    const px = C + (f.x - cx) * S
+    const py = C + (f.z - cz) * S
+    const p = u ? Math.max(0, Math.min(1, u.powerKw / 5000)) : 0
+    const yaw = unitYaw[i] ?? 0
+    // 尾流走廊：与 3D 粒子同一套 Jensen 扩张+偏航偏折公式（同源）
+    const a = 0.28
+    const edge = (sgn: 1 | -1) => {
+      const pts: string[] = []
+      for (let j = 0; j <= 8; j++) {
+        const x = 40 + j * 108
+        const half = (ROTOR_D / 2 + WAKE_K * x) * S
+        const off = 2 * a * x * Math.tan((yaw * Math.PI) / 180) * WAKE_DEFLECT * S
+        pts.push(`${(px + fx * x * S + (fz * (off + half * sgn))).toFixed(1)},${(py + fz * x * S + (-fx * (off + half * sgn))).toFixed(1)}`)
+      }
+      return pts
+    }
+    const poly = [...edge(1), ...edge(-1).reverse()].join(' ')
+    return (
+      <g key={f.id}>
+        <polygon points={poly} fill="rgba(130,225,255,.09)" stroke="rgba(150,235,255,.32)" strokeWidth="0.5" />
+        <circle cx={px} cy={py} r={3.1 + 5.4 * p} fill="none" stroke="rgba(190,240,255,.9)" strokeWidth="1.1" opacity={0.28 + 0.62 * p} />
+        <circle cx={px} cy={py} r="1.7" fill="#d9f4ff" />
+      </g>
+    )
+  })
   return (
     <div className="radar">
-      <svg className="rose-svg" width="236" height="236" viewBox="0 0 236 236" role="img"
-        aria-label={`16 方位风频玫瑰，主风 ${DIRS16[domI]} ${f1(frame.rose[domI])}%，当前 ${f1(frame.windSpeed)} 米每秒，来流方位 ${Math.round(fromDeg)} 度`}>
+      <svg className="radar-svg" width="236" height="236" viewBox="0 0 236 236" role="img"
+        aria-label={`风况雷达：风速 ${f1(frame.windSpeed)} 米每秒，来流方位 ${Math.round(fromDeg)} 度（${DIRS16[domI]}），亮环为机组功率，走廊为尾流偏折`}>
         <defs>
           <radialGradient id="radarBg" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="rgba(20,70,110,.5)" />
-            <stop offset="78%" stopColor="rgba(8,30,50,.36)" />
-            <stop offset="100%" stopColor="rgba(4,16,28,0)" />
+            <stop offset="0%" stopColor="rgba(18,64,102,.5)" />
+            <stop offset="72%" stopColor="rgba(8,30,50,.38)" />
+            <stop offset="100%" stopColor="rgba(4,16,28,.05)" />
           </radialGradient>
+          <linearGradient id="sweepG" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0%" stopColor="rgba(150,235,255,.34)" />
+            <stop offset="100%" stopColor="rgba(150,235,255,0)" />
+          </linearGradient>
         </defs>
-        <circle cx={C} cy={C} r={R + 14} fill="url(#radarBg)" stroke="rgba(110,215,255,.32)" strokeWidth="1" />
-        <circle cx={C} cy={C} r={R} fill="none" stroke="rgba(110,215,255,.42)" strokeWidth="1" />
-        {[0.5, 1].map((f) => (
-          <circle key={f} cx={C} cy={C} r={rIn + (R - rIn) * f} fill="none" stroke="rgba(110,215,255,.18)" strokeWidth="0.7" />
+        <circle cx={C} cy={C} r={R + 9} fill="url(#radarBg)" stroke="rgba(110,215,255,.34)" strokeWidth="1" />
+        {[0.36, 0.68, 1].map((f) => (
+          <circle key={f} cx={C} cy={C} r={R * f} fill="none" stroke="rgba(110,215,255,.2)" strokeWidth="0.7" />
         ))}
-        {DIRS16.map((d, i) => {
-          const [x1, y1] = pol(-90 + i * 22.5, rIn)
-          const [x2, y2] = pol(-90 + i * 22.5, R)
-          return <line key={d} x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(120,210,250,.10)" strokeWidth="0.6" />
-        })}
-        {/* 主风扇区高亮 */}
-        <path d={wedge(-90 + domI * 22.5 - 10.4, -90 + domI * 22.5 + 10.4, rIn - 3, R + 3)} fill="none" stroke="rgba(190,238,255,.5)" strokeWidth="1" />
-        {petals}
-        {[0.5, 1].map((f, i) => (
-          <text key={f} x={C + rIn + (R - rIn) * f + 3} y={C - 4 + i * 9} fontSize="8" fill="#6fa3c4">{f1(maxPct * f)}%</text>
-        ))}
-        {(['N', 'E', 'S', 'W'] as const).map((t, i) => {
-          const [x, y] = pol(-90 + i * 90, R + 9)
-          return <text key={t} x={x} y={y + 3} fontSize="9.5" fill="#8fc6e4" textAnchor="middle">{t}</text>
-        })}
-        {/* 当前来风矢量：来向 → 场心（气象惯例） */}
-        <g className="windvec">
-          <line x1={ax} y1={ay} x2={hx} y2={hy} stroke="#c9f2ff" strokeWidth="1.6" />
-          <path d={`M${hx},${hy} l${-Math.cos(ang - 0.42) * 11},${-Math.sin(ang - 0.42) * 11} M${hx},${hy} l${-Math.cos(ang + 0.42) * 11},${-Math.sin(ang + 0.42) * 11}`} stroke="#c9f2ff" strokeWidth="1.6" fill="none" />
+        <line x1={C - R} y1={C} x2={C + R} y2={C} stroke="rgba(120,210,250,.12)" strokeWidth="0.6" />
+        <line x1={C} y1={C - R} x2={C} y2={C + R} stroke="rgba(120,210,250,.12)" strokeWidth="0.6" />
+        {/* 扫描束（示意） */}
+        <g className="sweep">
+          <path d={`M${C},${C} L${C},${C - R} A${R},${R} 0 0 1 ${C + R * 0.5},${C - R * 0.866} Z`} fill="url(#sweepG)" />
+          <line x1={C} y1={C} x2={C} y2={C - R} stroke="rgba(190,246,255,.8)" strokeWidth="1.3" />
         </g>
-        <circle cx={C} cy={C} r={3.2} fill="#bfefff" />
+        {blips}
+        <g className="windvec">
+          <line x1={C - fx * (R + 9)} y1={C - fz * (R + 9)} x2={C} y2={C} stroke="#c9f2ff" strokeWidth="1.5" />
+          <path d={`M${C},${C} l${-fx * 11 + fz * 5.4},${-fz * 11 - fx * 5.4} M${C},${C} l${-fx * 11 - fz * 5.4},${-fz * 11 + fx * 5.4}`} stroke="#c9f2ff" strokeWidth="1.5" fill="none" />
+        </g>
+        <circle cx={C} cy={C} r={2.5} fill="#bfefff" />
+        <text x={C} y={11} fontSize="9" fill="#8fc6e4" textAnchor="middle">N</text>
+        <text x={C + 4} y={C - R * 0.36 + 9} fontSize="7" fill="#54819f">400m</text>
+        <text x={C + 4} y={C - R * 0.68 + 9} fontSize="7" fill="#54819f">800m</text>
       </svg>
-      <div className="rose-legend">
-        {ROSE_BIN_LABELS.map((t, i) => (
-          <span key={t}><i style={{ background: ROSE_BIN_COLORS[i] }} />{t}</span>
-        ))}
-      </div>
       <div className="radar-readout">
         <b>{f1(frame.windSpeed)} m/s</b>
-        <span>来流方位 {intFmt(fromDeg)}° · 主风 {DIRS16[domI]} {f1(frame.rose[domI])}%</span>
-        <em>当日 48 个半小时 · 与全场风况同源统计</em>
+        <span>来流方位 {intFmt(fromDeg)}° · {DIRS16[domI]} · 尾流损失 {intFmt(frame.wakeLossPct)}%</span>
+        <em>亮环=机组功率 · 走廊=尾流（随偏航扭曲）· 扫描束为示意</em>
       </div>
+      <button type="button" className={`btn ghost sm airflow-btn${airflow ? ' on' : ''}`} onClick={() => setAirflow(!airflow)} aria-pressed={airflow}>
+        三维气流场：{airflow ? '开' : '关'}
+      </button>
     </div>
   )
 }
@@ -204,7 +219,7 @@ function PowerChart() {
         <span className="k base" />对风基准 γ=0
         <span className="k fc" />Forecast +2h
       </div>
-      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
         <defs>
           <linearGradient id="pgrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stopColor="rgba(90,215,255,.34)" />
@@ -428,7 +443,7 @@ function KpiDelta({ frame }: { frame: ReturnType<typeof useFarmFrame> }) {
 
 /* ---------- 主组件 ---------- */
 export default function Hud() {
-  const scale = useStageScale()
+  const { scale, h: stageH } = useStageScale()
   const playing = useSim((s) => s.playing)
   const togglePlay = useSim((s) => s.togglePlay)
   const seek = useSim((s) => s.seek)
@@ -462,7 +477,7 @@ export default function Hud() {
 
   return (
     <div className="hud">
-      <div className="stage" style={{ width: SIZE.w, height: SIZE.h, transform: `translate(-50%, -50%) scale(${scale})` }}>
+      <div className="stage" style={{ width: SIZE.w, height: stageH, transform: `translate(-50%, -50%) scale(${scale})` }}>
         {/* ===== 顶部 ===== */}
         <header className="topbar">
           <div className="cornorn l" /><div className="cornorn r" />
@@ -521,41 +536,33 @@ export default function Hud() {
             </div>
           </Panel>
 
-          <Panel title="机组状态矩阵" en="Matrix 3×3" tall badge="演示">
+          <Panel title="机组状态矩阵" en="Matrix 3×3" badge="演示">
             <Matrix />
           </Panel>
 
+          <Panel title="实时功率" en="Real-time Power" badge="代理" cls="pchart">
+            <PowerChart />
+          </Panel>
         </div>
 
         {/* ===== 右列 ===== */}
         <div className="col right">
-          <Panel title="风况玫瑰" en="Wind Rose" badge="代理">
+          <Panel title="风况雷达" en="Wind Radar" badge="代理">
             <Radar />
           </Panel>
 
-          <Panel title="偏航角度" en="(deg)" tall>
+          <Panel title="偏航角度" en="(deg)" cls="pservo">
             <div className="servos">
               {Array.from({ length: 9 }, (_, i) => <ServoSlider key={i} i={i} />)}
             </div>
             <ControlConsole />
           </Panel>
 
-          <Panel title="报警通知" en="Alarms" badge="演示">
+          <Panel title="报警通知" en="Alarms" badge="演示" cls="palarms">
             <Alarms />
           </Panel>
         </div>
 
-  {/* 实时功率：底部通栏（任务#7：16:10 全要素无遮挡，图表不再被时间条压住） */}
-      <section className="panel chartbar">
-        <i className="c tl" /><i className="c br" />
-        <header className="ptitle">
-          <i className="sicon" />
-          <span className="zh">实时功率</span>
-          <span className="en">Real-time Power</span>
-          <Badge k="代理" />
-        </header>
-        <PowerChart />
-      </section>
 
       {/* ===== 底部时间轴 ===== */}
         <footer className="timeline">

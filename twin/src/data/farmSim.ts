@@ -84,8 +84,6 @@ export interface FarmFrame {
   daySeries: number[]
   baseSeries: number[]
   fcSeries: number[]
-  rose: number[]
-  rosePct: number[][]
   alarms: AlarmEvent[]
 }
 
@@ -203,8 +201,6 @@ interface HeavyFrame {
   daySeries: number[]
   baseSeries: number[]
   fcSeries: number[]
-  rose: number[]
-  rosePct: number[][]
   alarms: AlarmEvent[]
 }
 
@@ -293,25 +289,7 @@ function buildHeavy(tq: number, unitYaw: number[], targetMW: number, wind?: Wind
   list.sort((a, b) => a.minutesAgo - b.minutesAgo || a.key - b.key)
   const alarms = list.slice(0, 6)
 
-  // 风频玫瑰（任务#1 专业化）：不再手工模板——对驱动全场的同一"时变风况"
-  // 剖面（windAt，与功率/风纱消费的风完全同源）做当日 48 个半小时的诚实统计：
-  // 16 罗盘扇区 × 4 风速档，单位 = 出现频率 %。无任何编造数字。
-  const rose = new Array(16).fill(0) as number[]
-  const rosePct: number[][] = Array.from({ length: 16 }, () => new Array(4).fill(0))
-  for (let k = 0; k < 48; k++) {
-    const w = windAt(k * 0.5 + 0.25)
-    const deg = ((w.fromDeg % 360) + 360) % 360
-    const sec = Math.floor(((((deg % 360) + 360) % 360) + 11.25) / 22.5) % 16
-    const b = w.u < 6 ? 0 : w.u < 10 ? 1 : w.u < 14 ? 2 : 3
-    rose[sec] += 100 / 48
-    rosePct[sec][b] += 100 / 48
-  }
-  const r1 = (v: number) => Math.round(v * 10) / 10
-  for (let i = 0; i < 16; i++) {
-    rose[i] = r1(rose[i])
-    for (let b = 0; b < 4; b++) rosePct[i][b] = r1(rosePct[i][b])
-  }
-  return { energyTodayMWh, energyYearEstMWh, cfPct, daySeries, baseSeries, fcSeries, rose, rosePct, alarms }
+  return { energyTodayMWh, energyYearEstMWh, cfPct, daySeries, baseSeries, fcSeries, alarms }
 }
 
 function hashKey(s: string): number {
@@ -416,25 +394,33 @@ export function optimizeYaw(tHours: number, seedYaw: number[], wind?: WindOverri
  */
 export function dayNight(tHours: number): {
   dayF: number
+  moonF: number
   sunElDeg: number
   sunDir: [number, number, number]
   moonDir: [number, number, number]
 } {
+  // 整周角 θ：0=日出(5:24)、π=日落(18:36)、2π=次日日出——以 24h 为周期，
+  // 24:00→0:00 无缝衔接（旧版方位按 13.2h 半周线性旋转，午夜 wrap 时跳 32.7°，
+  // 月亮/影子瞬移的根因；且夜间仰角符号错误导致"半夜挂太阳"）。
   const tt = ((tHours % 24) + 24) % 24
-  const p = (tt - 5.4) / 13.2 // 0=日出 1=日落
-  const elDeg = 54 * Math.sin(Math.PI * p) * (p >= 0 && p <= 1 ? 1 : -0.34)
-  const azDeg = 90 + p * 180
+  const th = ((tt - 5.4) / 24) * Math.PI * 2
+  const elDeg = 54 * Math.sin(th) // 夜间为负=真在水平面下
   const el = (elDeg * Math.PI) / 180
-  const az = (azDeg * Math.PI) / 180
+  const az = ((90 + 180 * (th / Math.PI)) * Math.PI) / 180 // 东→西连续旋转
   const sx = Math.sin(az) * Math.cos(el)
   const sz = -Math.cos(az) * Math.cos(el)
   const sy = Math.sin(el)
-  const dayF = Math.min(1, Math.max(0, (elDeg + 4) / 16))
+  const dayF = Math.min(1, Math.max(0, (elDeg + 4) / 16)) // 连续，触底 0
+  // 月亮=日对点：方位 az+180、仰角 −38·sinθ（夜正昼负），日落/日出天然衔接
+  const elM = (38 * Math.sin(th) * Math.PI) / 180
+  const azM = az + Math.PI
+  const moonF = Math.min(1, Math.max(0, (-elDeg + 3) / 18))
   return {
     dayF,
+    moonF,
     sunElDeg: elDeg,
     sunDir: [sx, sy, sz],
-    moonDir: [-sx, Math.max(0.32, -sy), -sz],
+    moonDir: [Math.sin(azM) * Math.cos(elM), Math.max(0.06, Math.sin(elM)), -Math.cos(azM) * Math.cos(elM)],
   }
 }
 
