@@ -97,6 +97,17 @@ export default function WorldTerrain() {
         )
       shader.fragmentShader = shader.fragmentShader
         .replace('void main() {', 'varying float vW;\nvarying float vD;\nuniform float uGlow;\nvoid main() {')
+        // 第 21 轮：晶面"侧面"压暗。
+        // flatShading 下每个三角面法线恒定，陡面法线更朝向光源 → 侧面比顶面亮，
+        // 于是起伏处密布亮侧壁，画面显碎。这里按法线朝上程度衰减漫反射：
+        // up=1（水平顶面）不变，up→0（垂直侧壁）降到 0.30。
+        // 放在 normal_fragment_begin 之后（此处 normal 已就绪，光照尚未计算）。
+        .replace(
+          '#include <normal_fragment_begin>',
+          /* glsl */ `#include <normal_fragment_begin>
+  float upFace = abs(normal.y);
+  diffuseColor.rgb *= mix(0.30, 1.0, smoothstep(0.0, 0.62, upFace));`,
+        )
         .replace(
           '#include <emissivemap_fragment>',
           /* glsl */ `#include <emissivemap_fragment>
@@ -104,10 +115,11 @@ export default function WorldTerrain() {
   // 且 smoothstep 上下沿抬高收窄 → 只有真正的浪尖才亮，面与面的明暗跳动变小。
   float flow = smoothstep(0.68, 0.995, vW);
   float far = 1.0 - 0.82 * smoothstep(700.0, 2600.0, vD); // 远景轮廓光衰减（加强）
-  totalEmissiveRadiance += vec3(0.030, 0.070, 0.088) * flow * uGlow * far;`,
+  // 侧壁不吃波前辉光，否则刚压暗的侧面又被 emissive 点回来
+  totalEmissiveRadiance += vec3(0.030, 0.070, 0.088) * flow * uGlow * far * mix(0.18, 1.0, smoothstep(0.0, 0.62, abs(normal.y)));`,
         )
     }
-    m.customProgramCacheKey = () => 'terrain-wave-v5'
+    m.customProgramCacheKey = () => 'terrain-wave-v6'
     m.userData.u = u
     return { geo: ng, mat: m }
   }, [])

@@ -122,3 +122,16 @@ r12-mid-a/b（换日无缝）、r12-opt-base/after（寻优原理）。
 > 依赖用 `npm ci` 重装；NSS 桩库需按 `readelf -V /tmp/chromium` 列出的全部版本节点
 > （NSS_3.2/3.3/3.4/3.6/3.9.2/3.30、NSSUTIL_3.12.3）逐符号 `.symver` 绑定，
 > 且 `PR_*` 系列是**无版本**引用须以普通全局符号导出（`PR_Now` 必须返回真实微秒时间戳）。
+
+## 第 21 轮：晶面"侧面"压暗
+用户反馈：起伏三角块的**侧面**太亮，画面显碎。
+根因是 `flatShading` 的必然结果——每个三角面法线恒定，陡面法线更朝向光源，
+于是侧壁比顶面亮，起伏处密布亮侧壁。
+修复（`WorldTerrain`，按法线朝上程度衰减，不动顶面）：
+- 漫反射：在 `#include <normal_fragment_begin>` 之后插入
+  `diffuseColor.rgb *= mix(0.30, 1.0, smoothstep(0.0, 0.62, abs(normal.y)))`
+  —— 水平顶面 up=1 保持不变，垂直侧壁降到 0.30。
+- 波前辉光同样乘 `mix(0.18, 1.0, …)`，否则刚压暗的侧壁又被 emissive 点回来。
+- 缓存键 v5→v6。
+证据：`shots/r21-sides-after.png`（低掠射角，与用户截图同视角）、`r21-night.png`（23:06 夜景复核）。
+门禁：tsc 0 / oxlint 0 / selftest 34 通过 / build 通过。
