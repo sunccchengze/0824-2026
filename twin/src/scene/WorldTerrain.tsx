@@ -60,22 +60,56 @@ void main() {
 }
 `
 
-// W4/W5 真实地形表面：起伏由 terrainHeight 负责，表面由暗色 PBR + 程序微表面负责。
+// 任务#6 晶面地形：起伏仍由 terrainHeight 负责（物理/锚点口径不变），
+// 渲染面在其上叠加"晶体刻面"语义：
+//   · 高程按 26 m 台地量化(混合 0.42)——形成冰晶断台；
+//   · 逐三角面 ±3.2 m 确定性小抬沉 + 平面法线（flat facets）；
+//   · 面颜色按法线/随机做 ±12% 明度抖动（vertexColors），不引入新色相；
+//   · 半透明晶感（opacity 0.9）+ 接收阴影（LightRig 主灯）。
+// 微表面 detail 层保持原实现，贴合在同一量化面上。
+function hash2(ix: number, iz: number): number {
+  const n = Math.sin(ix * 127.1 + iz * 311.7) * 43758.5453
+  return n - Math.floor(n)
+}
+
 export default function WorldTerrain() {
   const { geo, detailGeo, detailMat } = useMemo(() => {
-    const g = new THREE.PlaneGeometry(7600, 7600, 220, 220)
+    const g = new THREE.PlaneGeometry(7600, 7600, 128, 128)
     g.rotateX(-Math.PI / 2)
     const pos = g.attributes.position
+    // 台地量化（晶面基底）
     for (let i = 0; i < pos.count; i++) {
-      pos.setY(i, terrainHeight(pos.getX(i), pos.getZ(i)))
+      const x = pos.getX(i)
+      const z = pos.getZ(i)
+      const h = terrainHeight(x, z)
+      const terrace = Math.round(h / 26) * 26
+      pos.setY(i, h * 0.58 + terrace * 0.42)
     }
-    g.computeVertexNormals()
+    // 逐面抬沉 + 顶点色
+    const ng = g.toNonIndexed()
+    const np = ng.attributes.position as THREE.BufferAttribute
+    const colors = new Float32Array(np.count * 3)
+    const CELL = 7600 / 128
+    for (let f = 0; f < np.count; f += 3) {
+      const cx = (np.getX(f) + np.getX(f + 1) + np.getX(f + 2)) / 3
+      const cz = (np.getZ(f) + np.getZ(f + 1) + np.getZ(f + 2)) / 3
+      const h = hash2(Math.round(cx / CELL), Math.round(cz / CELL))
+      const lift = (h - 0.5) * 6.4
+      const shade = 0.88 + hash2(Math.round(cz / CELL) + 57, Math.round(cx / CELL) - 31) * 0.24
+      for (let k = 0; k < 3; k++) {
+        np.setY(f + k, np.getY(f + k) + lift)
+        colors[(f + k) * 3] = shade
+        colors[(f + k) * 3 + 1] = shade
+        colors[(f + k) * 3 + 2] = shade
+      }
+    }
+    ng.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    ng.computeVertexNormals() // 非索引 → 平面法线，晶面高光由此而来
 
-    // 微表面层略微抬高，避免与 PBR 基面 z-fighting。
-    const dg = g.clone()
+    // 微表面层贴合量化面（等高线按 vWorld.y，仍与台面/坡面自洽）。
+    const dg = ng.clone()
     const dpos = dg.attributes.position
     for (let i = 0; i < dpos.count; i++) dpos.setY(i, dpos.getY(i) + 0.32)
-    dg.computeVertexNormals()
     const dm = new THREE.ShaderMaterial({
       vertexShader: DETAIL_VERT,
       fragmentShader: DETAIL_FRAG,
@@ -86,19 +120,21 @@ export default function WorldTerrain() {
       fog: false,
     })
 
-    return { geo: g, detailGeo: dg, detailMat: dm }
+    return { geo: ng, detailGeo: dg, detailMat: dm }
   }, [])
 
   return (
     <group>
-      <mesh geometry={geo}>
+      <mesh geometry={geo} receiveShadow>
         <meshStandardMaterial
           color="#040911"
+          vertexColors
           transparent
-          opacity={0.94}
-          roughness={0.98}
-          metalness={0.02}
-          envMapIntensity={0.10}
+          opacity={0.9}
+          roughness={0.86}
+          metalness={0.06}
+          envMapIntensity={0.14}
+          flatShading
         />
       </mesh>
       <mesh geometry={detailGeo} material={detailMat} renderOrder={0} />

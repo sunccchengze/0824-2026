@@ -1,8 +1,13 @@
-import { useMemo, useRef, useEffect } from 'react'
+/* oxlint-disable react/immutability -- 同 WindVeil：帧循环 mutate uniforms（docs/08 D2） */
+import { useMemo, useEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { FARM, SUBSTATION, terrainHeight } from './terrainUtil'
+import { mulberry32 } from '../data/rng'
 
+// W3 星光铺地：谷地 + 电缆走廊两处加密（基准图地面冰晶微光）。
+// D2/D11 修复：散布随机量改用 seed 派生 PRNG（StrictMode 双渲染/截图
+// 复现不再抖动）；材质对象不再在 useMemo 里写 ref。
 const VERT = /* glsl */ `
 attribute float aPhase;
 attribute float aSize;
@@ -29,35 +34,35 @@ void main() {
 }
 `
 
-// W3 星光铺地：谷地 + 电缆走廊两处加密（基准图地面冰晶微光）
-export default function SparkleGround({ count = 5200 }: { count?: number }) {
-  const matRef = useRef<THREE.ShaderMaterial>(null!)
-  const points = useMemo(() => {
+export default function SparkleGround({ count = 4600 }: { count?: number }) {
+  const built = useMemo(() => {
+    const rnd = mulberry32(0xBEEF42)
     const g = new THREE.BufferGeometry()
-    const pos = new Float32Array(count * 3), phase = new Float32Array(count)
-    const size = new Float32Array(count), col = new Float32Array(count * 3)
-    const c1 = new THREE.Color('#6fd8ff'), c2 = new THREE.Color('#dcf4ff')
+    const pos = new Float32Array(count * 3)
+    const phase = new Float32Array(count)
+    const size = new Float32Array(count)
+    const col = new Float32Array(count * 3)
+    const c1 = new THREE.Color('#6fd8ff')
+    const c2 = new THREE.Color('#dcf4ff')
     for (let i = 0; i < count; i++) {
       let x: number, z: number
       if (i % 10 < 7) {
-        // 谷地散布
-        const r = Math.sqrt(Math.random()) * 1450
-        const a = Math.random() * Math.PI * 2
+        const r = Math.sqrt(rnd()) * 1450
+        const a = rnd() * Math.PI * 2
         x = Math.cos(a) * r * 1.15 + 80
         z = Math.sin(a) * r * 0.95 - 60
       } else {
-        // 电缆走廊加密：随机一台机 → 升压站连线上取点
-        const u = FARM[(Math.random() * FARM.length) | 0]
-        const t = Math.random()
-        x = u.x + (SUBSTATION.x - u.x) * t + (Math.random() - 0.5) * 150
-        z = u.z + (SUBSTATION.z - u.z) * t + (Math.random() - 0.5) * 150
+        const u = FARM[(rnd() * FARM.length) | 0]
+        const t = rnd()
+        x = u.x + (SUBSTATION.x - u.x) * t + (rnd() - 0.5) * 150
+        z = u.z + (SUBSTATION.z - u.z) * t + (rnd() - 0.5) * 150
       }
       pos[i * 3] = x
-      pos[i * 3 + 1] = terrainHeight(x, z) + 0.9 + Math.random() * 3.0
+      pos[i * 3 + 1] = terrainHeight(x, z) + 0.9 + rnd() * 3.0
       pos[i * 3 + 2] = z
-      phase[i] = Math.random()
-      size[i] = 1.4 + Math.random() * 3.4
-      const c = Math.random() < 0.82 ? c1 : c2
+      phase[i] = rnd()
+      size[i] = 1.4 + rnd() * 3.4
+      const c = rnd() < 0.82 ? c1 : c2
       col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b
     }
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
@@ -70,13 +75,14 @@ export default function SparkleGround({ count = 5200 }: { count?: number }) {
       transparent: true, depthWrite: false,
       blending: THREE.AdditiveBlending, vertexColors: true,
     })
-    matRef.current = m
-    const p = new THREE.Points(g, m)
-    p.frustumCulled = false
-    return p
+    return { geo: g, mat: m }
   }, [count])
 
-  useEffect(() => () => { points.geometry.dispose(); (points.material as THREE.Material).dispose() }, [points])
-  useFrame((s) => { matRef.current.uniforms.uTime.value = s.clock.elapsedTime })
-  return <primitive object={points} />
+  useEffect(() => () => {
+    built.geo.dispose()
+    built.mat.dispose()
+  }, [built])
+
+  useFrame((s) => { built.mat.uniforms.uTime.value = s.clock.elapsedTime })
+  return <points geometry={built.geo} material={built.mat} frustumCulled={false} />
 }

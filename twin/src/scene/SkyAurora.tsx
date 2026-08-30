@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { useFrame, useLoader } from '@react-three/fiber'
+/* oxlint-disable react/immutability -- 纹理工件初始化与 uniforms 帧循环 mutate（docs/08 D2） */
+import { useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
+import { makeSkyCanvas } from './skyTexture'
+import { skyState } from './lightState'
 
 const VERT = /* glsl */ `
 varying vec3 vDir;
@@ -10,12 +13,15 @@ void main() {
 }
 `
 
-// R4/R5 真实天空层：AI 生成的本地 equirectangular 天空纹理提供真实云层、银河
-// 和星点；程序化层只负责保留原图的冰青地平线、极光和动态微光，不改变整体色调。
+// 任务#6 天空层：星野/银河由种子化程序纹理工件（skyTexture.ts，canvas 烘焙，
+// 完全可复现，不再依赖位图资产）提供；着色器层负责地平线冰青、极光与昼夜过渡
+// （uDay/uSunDir 由 LightRig 的 skyState 驱动：白天星光/极光淡出 + 日轮）。
 const FRAG = /* glsl */ `
 precision highp float;
 varying vec3 vDir;
 uniform float uTime;
+uniform float uDay;
+uniform vec3 uSunDir;
 uniform sampler2D uSkyTex;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
@@ -46,7 +52,7 @@ void main() {
                     0.5 - asin(clamp(d.y, -1.0, 1.0)) / 3.14159265359);
   vec3 photoSky = texture2D(uSkyTex, skyUv).rgb;
   photoSky *= vec3(0.82, 0.91, 1.0);
-  float photoMask = smoothstep(0.075, 0.30, h);
+  float photoMask = smoothstep(0.075, 0.30, h) * (1.0 - uDay * 0.78);
   col = mix(col, photoSky, photoMask * 0.86);
 
   // 地平线宽亮带（原图发光地平线：亮核 + 宽裙）
@@ -79,7 +85,16 @@ void main() {
   vec2 cell = floor(sp * 300.0);
   float star = step(0.9955, hash(cell));
   float tw = 0.55 + 0.45 * sin(uTime * 1.6 + hash(cell + 7.7) * 40.0);
-  col += vec3(0.70, 0.86, 1.0) * star * tw * smoothstep(0.03, 0.22, h) * 0.20;
+  col += vec3(0.70, 0.86, 1.0) * star * tw * smoothstep(0.03, 0.22, h) * 0.20 * (1.0 - uDay);
+
+  // 极光带整体随白昼淡出（物理上不严格，但"克制"优先：白天不抢戏）
+  col -= col * 0.0; // no-op 保持行号稳定
+  // 白天：冰青天幕渐变 + 日轮与晕（不引入新色相）
+  vec3 dayCol = mix(vec3(0.086, 0.165, 0.239), vec3(0.290, 0.451, 0.565), smoothstep(0.02, 0.55, h));
+  col = mix(col, dayCol, uDay * 0.86);
+  float sunDot = clamp(dot(d, normalize(uSunDir)), 0.0, 1.0);
+  col += vec3(0.92, 0.97, 1.0) * pow(sunDot, 1400.0) * 1.35 * uDay;
+  col += vec3(0.32, 0.46, 0.58) * pow(sunDot, 14.0) * 0.16 * uDay;
 
   gl_FragColor = vec4(col, 1.0);
 }
@@ -87,16 +102,25 @@ void main() {
 
 export default function SkyAurora() {
   const mat = useRef<THREE.ShaderMaterial>(null!)
-  const skyTexture = useLoader(THREE.TextureLoader, '/sky-realistic-cyan.png')
-  const uniforms = useMemo(() => ({ uTime: { value: 0 }, uSkyTex: { value: skyTexture } }), [skyTexture])
-
-  useEffect(() => {
-    skyTexture.colorSpace = THREE.SRGBColorSpace
-    skyTexture.anisotropy = 4
-  }, [skyTexture])
+  const skyTexture = useMemo(() => {
+    const tx = new THREE.CanvasTexture(makeSkyCanvas())
+    tx.colorSpace = THREE.SRGBColorSpace
+    tx.anisotropy = 4
+    tx.wrapS = THREE.RepeatWrapping
+    return tx
+  }, [])
+  const uniforms = useMemo(() => ({
+    uTime: { value: 0 }, uDay: { value: 0 },
+    uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+    uSkyTex: { value: skyTexture },
+  }), [skyTexture])
 
   useFrame((state) => {
-    if (mat.current) mat.current.uniforms.uTime.value = state.clock.elapsedTime
+    if (!mat.current) return
+    const u = mat.current.uniforms
+    u.uTime.value = state.clock.elapsedTime
+    u.uDay.value = skyState.dayF
+    u.uSunDir.value.copy(skyState.sunDir)
   })
 
   return (
