@@ -20,6 +20,18 @@ import { useSim } from '../state/simStore'
 // 第 23 轮（视觉精修 pass）：晶面明度收敛（逐面差 0.09→0.07、均值 −0.02）
 // + 片元空气透视（随 vD 混向深雾蓝，封顶 55%）——只动视觉层，
 // 高程/波浪位移/贴地基准/阴影接收全部原样。
+// 第 24 轮（用户跨多轮诉求：棱柱侧面"绿得发亮"要压下去；
+//   用户第 24 轮明确：最突兀的是**夜间**——每个三角棱柱的侧面都是青蓝色，
+//   要求变成暗色）。根因 = 夜间顶面近黑，侧墙却吃两盏青调补光
+//   (#3f88b8 hue200°/#86b8dc hue203°)+月光(#d6e6ff)，青蓝侧壁在黑顶面
+//   上对比最强。三层修正（仅地形 shader，灯光/风机/昼夜光照全部原样，
+//   日出后氛围基线帧不受影响）：
+//   ① 侧壁 albedo 门 0.30→0.18（侧墙物理上不是受光面，先砍能量）；
+//   ② 片元末段（光照+雾之后）对低 upFace 面"去青+压暗"，昼夜分档：
+//      白天 去青0.60/×0.66/目标(0.66,0.80,1.00)；
+//      夜间 去青0.85/×0.42/目标(0.70,0.78,0.94)——夜间侧壁收进暗色；
+//   ③ 波前辉光色相再向蓝收 (0.030,0.070,0.088)→(0.028,0.062,0.094)，
+//      白天 uGlow 上限 0.72→0.60、夜间下限 0.34→0.12（涌动保留在顶面）。
 // ============================================================
 
 function hash2(ix: number, iz: number): number {
@@ -71,7 +83,7 @@ export default function WorldTerrain() {
     ng.computeVertexNormals()
     g.dispose()
 
-    const u = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(0, 1) }, uGlow: { value: 1 } }
+    const u = { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(0, 1) }, uGlow: { value: 1 }, uDayF: { value: 1 } }
     const m = new THREE.MeshStandardMaterial({
       color: '#02060c',
       vertexColors: true,
@@ -84,6 +96,7 @@ export default function WorldTerrain() {
       shader.uniforms.uTime = u.uTime
       shader.uniforms.uWind = u.uWind
       shader.uniforms.uGlow = u.uGlow
+      shader.uniforms.uDayF = u.uDayF
       shader.vertexShader = shader.vertexShader
         .replace('void main() {', 'attribute float aRnd;\nvarying float vW;\nvarying float vD;\nuniform float uTime;\nuniform vec2 uWind;\nvoid main() {')
         .replace(
@@ -101,7 +114,7 @@ export default function WorldTerrain() {
   vW = clamp(wv * 0.78 + wv2 * 0.22, 0.0, 1.0);`,
         )
       shader.fragmentShader = shader.fragmentShader
-        .replace('void main() {', 'varying float vW;\nvarying float vD;\nuniform float uGlow;\nvoid main() {')
+        .replace('void main() {', 'varying float vW;\nvarying float vD;\nuniform float uGlow;\nuniform float uDayF;\nvoid main() {')
         // 第 21 轮：晶面"侧面"压暗。
         // flatShading 下每个三角面法线恒定，陡面法线更朝向光源 → 侧面比顶面亮，
         // 于是起伏处密布亮侧壁，画面显碎。这里按法线朝上程度衰减漫反射：
@@ -111,7 +124,8 @@ export default function WorldTerrain() {
           '#include <normal_fragment_begin>',
           /* glsl */ `#include <normal_fragment_begin>
   float upFace = abs(normal.y);
-  diffuseColor.rgb *= mix(0.30, 1.0, smoothstep(0.0, 0.62, upFace));
+  // 第 24 轮：侧壁门 0.30→0.18（侧墙非受光面，先砍能量，压"绿得发亮"）
+  diffuseColor.rgb *= mix(0.18, 1.0, smoothstep(0.0, 0.62, upFace));
   // 第 23 轮：空气透视（与场景 FogExp2 互补）。
   // 随相机水平距离把晶面漫反射混向深雾蓝色调：面间明暗台阶被抹平、
   // 中远景整体下沉——近排最亮、中排次之、远排收进雾色，
@@ -125,23 +139,68 @@ export default function WorldTerrain() {
           /* glsl */ `#include <emissivemap_fragment>
   // 第 19 轮：波峰辉光整体压暗（亮度约 −55%）、色相往青灰收（去蓝绿），
   // 且 smoothstep 上下沿抬高收窄 → 只有真正的浪尖才亮，面与面的明暗跳动变小。
+  // 第 24 轮：色相再向蓝收 (0.030,0.070,0.088)→(0.028,0.062,0.094)
   float flow = smoothstep(0.68, 0.995, vW);
   float far = 1.0 - 0.82 * smoothstep(700.0, 2600.0, vD); // 远景轮廓光衰减（加强）
   // 侧壁不吃波前辉光，否则刚压暗的侧面又被 emissive 点回来
-  totalEmissiveRadiance += vec3(0.030, 0.070, 0.088) * flow * uGlow * far * mix(0.18, 1.0, smoothstep(0.0, 0.62, abs(normal.y)));`,
+  // 第 24 轮：夜间辉光色相再向蓝收（去 G 分量），白天保持
+  vec3 glowC = mix(vec3(0.028, 0.062, 0.094), vec3(0.015, 0.036, 0.082), 1.0 - uDayF);
+  totalEmissiveRadiance += glowC * flow * uGlow * far * mix(0.18, 1.0, smoothstep(0.0, 0.62, abs(normal.y)));`,
+        )
+        // 第 24 轮：侧壁/夜间"去青+压暗"终段修正（用户跨多轮诉求，
+        // 第 24 轮明确：最突兀在**夜间**——每个三角棱柱侧面青蓝发亮，要变暗色）。
+        // 根因（像素测量确认）：夜间顶面近黑，抬升晶面吃两盏青调补光
+        // (#3f88b8 hue200°/#86b8dc hue203°)+月光(#d6e6ff) → 亮棱边呈 cyan
+        // (medHue≈196, G-R≈+48)，在黑顶面上对比最强。两层修正：
+        //   ① 侧墙（upFace 低）：去青 0.60/0.85(夜) + ×0.66/0.42(夜)；
+        //   ② 夜间整体地面：按亮度软压缩（越亮收越多）+ 去青向暗蓝灰，
+        //      压平"黑顶面 vs 青亮棱边"的强对比 → 棱边收进暗色。
+        // 顶面白天(sideW≈0, night≈0)完全不受影响；日出场氛围基线帧不动。
+        .replace(
+          '#include <opaque_fragment>',
+          /* glsl */ `#include <opaque_fragment>
+  {
+    float night = 1.0 - uDayF;
+    float sideW = 1.0 - smoothstep(0.0, 0.62, upFace);
+    float luma = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 c = gl_FragColor.rgb;
+    // ① 侧墙去青 + 压暗
+    if (sideW > 0.003) {
+      float desat = mix(0.60, 0.85, night);
+      float dark  = mix(0.66, 0.42, night);
+      vec3 neuT   = mix(vec3(0.66, 0.80, 1.00), vec3(0.70, 0.78, 0.94), night);
+      c = mix(c, vec3(luma) * neuT, desat);
+      c = mix(c, c * dark, sideW);
+    }
+    // ② 夜间整体：亮部软压缩 + 去青（棱边收进暗色）。
+    // 注意：此处 gl_FragColor 为线性空间（tonemap 前）——亮棱边 luma≈0.08-0.25，
+    // 阈值按线性标定（0.010/0.08）宽沿，暗基底(<0.02)几乎不动。
+    float nightAmt = night * smoothstep(0.010, 0.08, luma);
+    if (nightAmt > 0.003) {
+      c = mix(c, vec3(luma) * vec3(0.46, 0.60, 0.88), 0.75 * nightAmt);
+      c *= mix(1.0, 0.45, nightAmt);
+    }
+    // ③ 夜间整体收暗（用户第 24 轮：夜间棱柱侧面青蓝发亮，要变暗色）。
+    // 控制变量验证（t=23 同月光角）：仅 ①② 时英雄机位地面仅 −4%（不足）——
+    // 月光+青调补光把中远景晶面棱边整体点亮，必须全局收暗让棱边网络沉入暗色。
+    // 白天 night≈0 完全无影响；日出后氛围基线帧（dayF>0）不动。
+    c *= mix(1.0, 0.52, night);
+    gl_FragColor.rgb = c;
+  }`,
         )
     }
-    m.customProgramCacheKey = () => 'terrain-wave-v7'
+    m.customProgramCacheKey = () => 'terrain-wave-v13'
     m.userData.u = u
     return { geo: ng, mat: m }
   }, [])
 
   useFrame((state) => {
-    const uu = mat.userData.u as { uTime: { value: number }; uWind: { value: THREE.Vector2 }; uGlow: { value: number } }
+    const uu = mat.userData.u as { uTime: { value: number }; uWind: { value: THREE.Vector2 }; uGlow: { value: number }; uDayF: { value: number } }
     uu.uTime.value = state.clock.elapsedTime
-    // 夜间波前增亮收半（用户：夜里对比过高）；白天保持
-    // 白天上限由 1.00 降到 0.72，夜间下限 0.45→0.34
-    uu.uGlow.value = 0.34 + 0.38 * skyState.dayF
+    // 夜间波前增亮再收（用户第 24 轮：夜间棱柱侧面青蓝发亮最突兀）
+    // 白天上限 0.72→0.60，夜间下限 0.34→0.12
+    uu.uGlow.value = 0.08 + 0.52 * skyState.dayF
+    uu.uDayF.value = skyState.dayF
     const { fromDeg } = windAt(useSim.getState().tHours)
     const th = (fromDeg * Math.PI) / 180
     uu.uWind.value.set(Math.sin(th), Math.cos(th)) // 风的去向（北来→+z）

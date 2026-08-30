@@ -1,6 +1,6 @@
-# 已装载技能清单（26 项）
+# 已装载技能清单（27 项）
 
-> 来源：用户通用技能库 [sunccchengze/-SKILL-](https://github.com/sunccchengze/-SKILL-)(arena/01a0095c-skill)，按其官方协议检索并以 `scripts/install_skills.py` 安装，2026-08-24。
+> 来源：用户通用技能库 [sunccchengze/-SKILL-](https://github.com/sunccchengze/-SKILL-)（26 项自 arena/01a0095c-skill，按其官方协议检索并以 `scripts/install_skills.py` 安装，2026-08-24；第 27 项 `gsap-plugins` 自最新提交分支 arena/01a048e7-skill 安装，2026-08-30，第 24 轮）。
 > 目录即技能包：每项含 `SKILL.md`（+可能的脚本/资源），实施时按需展开阅读。
 
 ## 🎯 3D / WebGL / 游戏画质（本项目主角）
@@ -14,6 +14,7 @@
 | game-playtest | 浏览器端玩法/渲染 QA：截图验证、自动化巡检 |
 | img2threejs | 参考图 → 程序化 three.js 资产（备：自制风机零件/装饰物） |
 | scroll-world | 滚动驱动"穿越世界"运镜范式 → 我们的开场巡航/叙事镜头 |
+| gsap-plugins | 官方 GSAP 插件技能（Inertia/MotionPath/CustomEase 等）→ 第 24 轮开场无人机运镜的"惯性"语义来源：track 速度→指数滑行减速停止、沿路径变速+切向对齐（本项目不新增依赖，按技能原则原生移植到 `twin/src/scene/introProfile.ts` + `CameraRig.tsx`） |
 | epic-design | 影院级、沉浸式设计的目标设定与评审语言 |
 | shaders-cursor-ripples | WebGPU/GLSL 交互涟漪 shader 模式（选中机组的拾取波纹可借鉴） |
 | liquid-metal-border | WebGL 液态金属边框（旗舰面板的高光描边备选） |

@@ -20,7 +20,7 @@ const ITEMS: {
   en: string
   line?: number
 }[] = [
-  { at: ANCHOR.power, side: 'r', zh: '全场功率总览', en: 'Farm Power Overview', line: 58 },
+  // 第 24 轮：按用户要求删除"全场功率总览"3D 标注（左侧 2D 面板保留，不受影响）
   { at: ANCHOR.wake, side: 'l', zh: '风能资源场', en: 'Wind Resource / Wake Field', line: 46 },
   { at: ANCHOR.turbine, side: 'r', zh: '风机 · NREL 5MW 级', en: 'Turbine (5MW-class, holographic)', line: 42 },
   { at: ANCHOR.cable, side: 'r', zh: '集电线路 · 35 kV', en: 'Array Cable Circuit', line: 40 },
