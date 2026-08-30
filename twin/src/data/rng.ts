@@ -46,3 +46,19 @@ export function smoothNoise(x: number, seed = 0): number {
   const b = noise1(i + 1, seed)
   return a + (b - a) * u
 }
+
+/**
+ * 周期平滑噪声：与 smoothNoise 同构，但整数格点按 period 取模，
+ * 因此 f(x) ≡ f(x + period)。用于任何"挂在 24h 时间轴上"的量
+ * （风速/风向），否则 23:59→00:00 会出现整段噪声跳变。
+ * period 必须为正整数格点数。
+ */
+export function periodicSmoothNoise(x: number, period: number, seed = 0): number {
+  const i = Math.floor(x)
+  const f = x - i
+  const u = f * f * (3 - 2 * f)
+  const m = (k: number) => ((k % period) + period) % period
+  const a = noise1(m(i), seed)
+  const b = noise1(m(i + 1), seed)
+  return a + (b - a) * u
+}

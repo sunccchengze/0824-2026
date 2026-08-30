@@ -16,7 +16,7 @@
 // ================================================================
 
 import { FARM } from '../scene/terrainUtil.ts'
-import { smoothNoise } from './rng.ts'
+import { smoothNoise, periodicSmoothNoise } from './rng.ts'
 import {
   powerCurveKw, rotorRpm, wakeDeficit, yawFactor, genTempC, gridFrequency, WAKE_REV} from './turbinePhysics.ts'
 
@@ -90,24 +90,34 @@ export interface FarmFrame {
 // ---- 时变风况（确定性）----
 export function windAt(tHours: number): { u: number; fromDeg: number } {
   // 昼夜风廓线 + 平滑扰动（seed 固定，跨帧一致；夜间风大是低空风切变常见现象）
+  // BUG-FIX（第 18 轮）：原用 smoothNoise(t*k)，其整数格点不随 24h 循环，
+  // 且 fromDeg 里的 sin(t*0.13)/sin(t*0.37) 周期也不是 24 的约数 ——
+  // 实测 23:59→00:00 风向瞬跳 23.2°（日内相邻步的 2715 倍），
+  // 这就是"风机与尾流在 24:00/0:00 交界断裂突变"的根因。
+  // 现全部改为以 24h 为周期的构造：噪声格点取模、正弦频率取 2π·n/24。
   const diurnal = 7.9 + 2.1 * Math.cos(((tHours - 3) / 24) * Math.PI * 2)
-  const slow = 1.8 * (smoothNoise(tHours * 0.55, 5) - 0.5)
-  const fast = 0.64 * (smoothNoise(tHours * 2.7, 9) - 0.5)
+  const slow = 1.8 * (periodicSmoothNoise(tHours * 0.5, 12, 5) - 0.5)
+  const fast = 0.64 * (periodicSmoothNoise(tHours * 3, 72, 9) - 0.5)
   const u = Math.min(13.2, Math.max(5.4, diurnal + slow + fast))
   // 来流方位：均值风北 + 慢尺度摆摆（veer，N±9°）。幅度小是为了与尾流/对风
   // 标定（docs/07）兼容；足以让 16 扇区风频玫瑰出现真实的主/次方向分布。
+  const W = (2 * Math.PI) / 24 // 基频：一天整一圈
   const fromDeg =
     BASE_WIND_FROM - 2 +
-    26 * (smoothNoise(tHours * 0.4, 3) - 0.5) +
-    9 * Math.sin(tHours * 0.13 + 0.9) +
-    4 * Math.sin(tHours * 0.37 + 2.1)
+    26 * (periodicSmoothNoise(tHours * 0.5, 12, 3) - 0.5) +
+    9 * Math.sin(tHours * W + 0.9) +
+    4 * Math.sin(tHours * 3 * W + 2.1)
   return { u, fromDeg }
 }
 
 /** 单机自由流风（含空间微差异）；baseU 提供时替代时变剖面（校准/快照模式） */
 export function freeWindAt(tHours: number, x: number, z: number, baseU?: number): number {
   const u = baseU ?? windAt(tHours).u
-  return Math.max(0, u + 0.44 * (smoothNoise(x * 0.004 + z * 0.003 + tHours * 0.9, 17) - 0.5))
+  // 时间项同样必须 24h 周期（否则单机自由流在午夜也会跳）；空间项与时间项分离叠加。
+  const sp = smoothNoise(x * 0.004 + z * 0.003, 17) - 0.5
+  // 速率取 0.875 使 0.875×24 = 21 为整数格点，取模才真正闭合（0.9×24=21.6 不闭合）
+  const tm = periodicSmoothNoise(tHours * 0.875, 21, 23) - 0.5
+  return Math.max(0, u + 0.44 * (0.6 * sp + 0.4 * tm))
 }
 
 export interface WindOverride { u: number; fromDeg: number }

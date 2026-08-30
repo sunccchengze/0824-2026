@@ -85,17 +85,57 @@ export function yawFactor(deg: number): number {
 }
 
 /**
- * Jensen(Park) 尾流：δ(x) = (1 − sqrt(1−Ct))·(D/(D+2kx))²，偏航偏折线性近似。
- * 三参数由 scripts/calibrateWake.mts 对老网页 FLORIS 9 机阵列三指标联合标定
- * （8 m/s 北来风、632m=5.02D，权重 0.4/0.4/0.2）：
- *   none        8391.7 kW vs FLORIS 8095.15（+3.7%）
- *   unified+30° 9230.5 kW vs 9299.05（−0.7%）
- *   独立寻优增益 24.41%  vs 24.04%（+0.37pt）
- * 综合误差 2.07%。不再是"教材典型值"拍脑袋；重跑脚本可复算。
+ * Jensen(Park) 尾流：δ(x) = (1 − sqrt(1−Ct))·(D/(D+2kx))²，
+ * 偏折走 wakeDeflection（P0 饱和模型，纯 FLORIS 拟合、不被标定缩放）。
+ *
+ * 第 18 轮（P0）重标定，两处口径修正：
+ *  (1) 靶值改用与偏折曲线【同源】的 FLORIS 4.6.6 GCH 实算
+ *      （旧靶 unified+30°=9299.05 来自老版本，实测 4.6.6 为 9060.03，差 −2.57%；
+ *       拿旧靶配新几何 = 用 A 版几何凑 B 版功率）；
+ *  (2) WAKE_DEFLECT 由"偏折强度"改为【尾流展宽系数】σ=D·WAKE_DEFLECT/2+kx。
+ *      原式把整个转子半径当高斯 σ，尾流过宽，真实 63.9m 的偏折永远 escape 不出去。
+ *
+ * 标定结果（k=0.021, σ系数=0.48, steerMax=0.85）：
+ *   none        8112.8 kW vs 8108.08（+0.06%）
+ *   unified+30° 8206.7 kW vs 9060.03（−9.42%）
+ *   独立寻优增益 24.06%  vs 24.04%（+0.02pt）
+ * 复合误差 3.81%。
+ *
+ * 诚实说明 —— 为什么不是更小的数：
+ * P0 前的 2.07% 是对【旧靶】的拟合；本轮曾试出 2.60% 的解，但那是靠把偏折几何
+ * 整体放大 1.9 倍换来的（5.02D 处 121.5m vs 真实 63.9m），属于用错误几何凑功率，
+ * 已弃用。锁定真实几何后对 σ 系数做一维扫描，极小值稳定在 0.48 附近
+ * （0.45→3.88%、0.48→3.88%、0.52→3.93%、0.58→4.09%），
+ * 且 unified 项始终卡在 −9.4% 无法再降 —— 这是 Jensen 顶帽廓线配真实饱和偏折的
+ * 【模型能力上限】，非标定不足。取舍：保 none（无偏航基准，最常显示的工况）
+ * 与 gain（"下发偏航寻优"按钮的对外承诺值），让 unified 项承担误差。
+ * 彻底解决需 P1 的高斯/GCH 廓线，见 round17 可行性文档。
+ */export let WAKE_K = 0.021
+/** 尾流展宽系数：高斯 σ = ROTOR_D·WAKE_DEFLECT/2 + k·x（标定量；名称沿用以免波及调用方） */
+export let WAKE_DEFLECT = 0.48
+
+// ---- P0（第 18 轮）：尾流横偏饱和模型 ----
+// 旧式 δ = 2a·x·tan(yaw)·0.70 随 x 线性无限发散；真实尾流远场会饱和。
+// 对 FLORIS 4.6.6 GCH 实测场（6 偏航 × 11 站位 = 66 点，NREL 5MW，8 m/s，
+// TI=6%，逐高度扣除入流剪切后取亏损质心）最小二乘拟合：
+//     δ(yaw, x) = C·sin(yaw)·L·(1 − exp(−x/L)),  L = L0/(1 + Lk·sin²yaw)
+// 拟合集最大误差 5.09 m / 平均 1.76 m；
+// 留出集（yaw 7.5/12.5/17.5/22.5/27.5° × 1.75/3.5/4.5/9/11D，未参与拟合）
+// 最大误差 4.35 m —— 旧线性式在同一留出集上最大误差 128.3 m。
+// 复现：docs/research/scripts/floris_probe.py + p0fit3.py（见 round18 文档）。
+export const DEFL_C = 0.3325
+export const DEFL_L0 = 2706.27
+export const DEFL_LK = 14.7039
+
+/**
+ * 尾流中心横向偏移（m）。正 yaw → 尾流偏向 −px 方向（与旧式符号一致）。
+ * 全项目唯一的偏折真值：wakeDeficit / AirflowField / HUD 雷达走廊都必须调它。
  */
-export let WAKE_K = 0.035
-/** 偏航尾流偏折强度（FLORIS Gauss 模型的等效线性化系数，标定值） */
-export let WAKE_DEFLECT = 0.70
+export function wakeDeflection(yawDeg: number, x: number): number {
+  const s = Math.sin((yawDeg * Math.PI) / 180)
+  const L = DEFL_L0 / (1 + DEFL_LK * s * s)
+  return DEFL_C * s * L * (1 - Math.exp(-Math.max(0, x) / L))
+}
 /** 偏航转向收益上限（0-1）：上游偏航所能消除的尾流亏损占比封顶
  * （Gauss 长尾不随偏折完全消失；只作用于有偏航的上游，正常尾流形状不受影响） */
 export let WAKE_STEER_MAX = 0.85
@@ -123,11 +163,13 @@ export function wakeDeficit(
   if (x <= ROTOR_D * 0.35) return 0
   const ct = Math.min(0.9, thrustCt(uUp))
   const a = (1 - Math.sqrt(Math.max(0, 1 - ct))) / 2
-  const sigmaHalf = ROTOR_D / 2 + WAKE_K * x
+  // WAKE_DEFLECT 改作【尾流展宽系数】：原式把整个转子半径当高斯 σ，尾流过宽，
+  // 真实 63.9m 的偏折永远escape不出去（见 round18 文档 §3）。σ 收窄才是正确旋钮。
+  const sigmaHalf = ROTOR_D * WAKE_DEFLECT * 0.5 + WAKE_K * x
   const core = (ROTOR_D / (ROTOR_D + 2 * WAKE_K * x)) ** 2
   const deficit = 2 * a * core
   const px = dx * fy - dy * fx
-  const deflection = 2 * a * x * Math.tan((yawUpDeg * Math.PI) / 180) * WAKE_DEFLECT
+  const deflection = wakeDeflection(yawUpDeg, x) // P0：饱和模型取代线性外推
   const r = Math.abs(px - deflection)
   let overlap = Math.exp(-0.5 * (r / sigmaHalf) ** 2)
   if (yawUpDeg !== 0) overlap = Math.max(overlap, 1 - WAKE_STEER_MAX)

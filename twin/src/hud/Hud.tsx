@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSim, useFarmFrame } from '../state/simStore'
 import { FARM } from '../scene/terrainUtil'
 import { UNIT_NAMEPLATE, FARM_RATED_MW } from '../data/farmSim'
-import { ROTOR_D, WAKE_K, WAKE_DEFLECT } from '../data/turbinePhysics'
+import { ROTOR_D, WAKE_K, wakeDeflection } from '../data/turbinePhysics'
 
 // ================================================================
 // 未来能源数字孪生系统 —— 大屏 HUD（v3：全读数接演示数据契约）
@@ -127,15 +127,15 @@ function Radar() {
     const px = C + (f.x - cx) * S
     const py = C + (f.z - cz) * S
     const p = u ? Math.max(0, Math.min(1, u.powerKw / 5000)) : 0
-    const yaw = unitYaw[i] ?? 0
+    // BUG-FIX：走廊须用对风偏差（与 wakeDeficit / AirflowField 同源），非指令角
+    const yaw = (unitYaw[i] ?? 0) - frame.windFromDeg
     // 尾流走廊：与 3D 粒子同一套 Jensen 扩张+偏航偏折公式（同源）
-    const a = 0.28
     const edge = (sgn: 1 | -1) => {
       const pts: string[] = []
       for (let j = 0; j <= 8; j++) {
         const x = 40 + j * 108
         const half = (ROTOR_D / 2 + WAKE_K * x) * S
-        const off = 2 * a * x * Math.tan((yaw * Math.PI) / 180) * WAKE_DEFLECT * S
+        const off = wakeDeflection(yaw, x) * S
         pts.push(`${(px + fx * x * S + (fz * (off + half * sgn))).toFixed(1)},${(py + fz * x * S + (-fx * (off + half * sgn))).toFixed(1)}`)
       }
       return pts

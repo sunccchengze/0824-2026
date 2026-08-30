@@ -4,7 +4,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { FARM, terrainHeight } from './terrainUtil'
 import { windAt } from '../data/farmSim'
-import { ROTOR_D, WAKE_K, WAKE_DEFLECT, thrustCt } from '../data/turbinePhysics'
+import { ROTOR_D, WAKE_K, thrustCt, wakeDeflection } from '../data/turbinePhysics'
 import { useSim } from '../state/simStore'
 import { mulberry32 } from '../data/rng.ts'
 
@@ -167,11 +167,14 @@ export default function AirflowField() {
     const ct = Math.min(0.9, thrustCt(baseU))
     const a = (1 - Math.sqrt(Math.max(0, 1 - ct))) / 2
     const NX = FARM.length
-    const x9: number[] = new Array(NX), z9: number[] = new Array(NX), tan9: number[] = new Array(NX)
+    const x9: number[] = new Array(NX), z9: number[] = new Array(NX), yawErr9: number[] = new Array(NX)
     for (let j = 0; j < NX; j++) {
       x9[j] = FARM[j].x
       z9[j] = FARM[j].z
-      tan9[j] = Math.tan((s.unitYaw[j] ?? 0) * (Math.PI / 180)) * WAKE_DEFLECT
+      // BUG-FIX：此处原用指令偏航角 unitYaw，而功率链 wakeDeficit 用的是
+      // 对风偏差 (unitYaw − fromDeg)。风向一偏离正北，画面尾流方向就和功率
+      // 算出来的方向对不上（实测 fromDeg=11° 时 800m 处差 61~74m）。
+      yawErr9[j] = (s.unitYaw[j] ?? 0) - w.fromDeg
     }
 
     const g = streaks.geometry
@@ -192,7 +195,7 @@ export default function AirflowField() {
         if (ax <= ROTOR_D * 0.35) continue
         const cr = dx * cxv + dz * czv
         const sigma = ROTOR_D * 0.5 + WAKE_K * ax
-        const q = (cr - 2 * a * ax * tan9[j]) / sigma
+        const q = (cr - wakeDeflection(yawErr9[j], ax)) / sigma
         const bell = Math.exp(-0.5 * q * q)
         const core = (ROTOR_D / (ROTOR_D + 2 * WAKE_K * ax)) ** 2
         const di = Math.min(0.85, 2 * a * core * bell)
@@ -246,12 +249,12 @@ export default function AirflowField() {
     const ca = cp.array as Float32Array
     let c = 0
     for (let j = 0; j < NX; j++) {
-      const t = tan9[j]
+      const ye = yawErr9[j]
       const by = terrainHeight(x9[j], z9[j]) + 88
       for (let r = 0; r < N_RING; r++) {
         const ax = 70 + r * (r * 15 + 46)
         const rad0 = ROTOR_D * 0.52 + WAKE_K * ax
-        const off = 2 * a * ax * t
+        const off = wakeDeflection(ye, ax)
         for (let kk = 0; kk < N_SEG; kk++) {
           const ang = (kk / N_SEG) * Math.PI * 2
           const wob = 1 + 0.035 * Math.sin(ang * 3 + now * 1.2 + j * 2.1) // 0.12→0.035：扭曲幅度收小
