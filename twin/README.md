@@ -15,6 +15,7 @@ npm run build      # tsc -b && vite build → dist/（0 错误）
 npm run lint       # oxlint（0 警告 0 错误；R3F 每帧 ref/uniform 惯用法为带注释的文件级豁免）
 npm run selftest   # 数据契约 22 断言（Node 22 原生类型剥离，无浏览器依赖）
 node scripts/shot.mjs <url> <out.png> [settleMs] [w] [h]  # 无头自拍（沙箱需 /tmp/nsslibs，真机无需）
+node scripts/probe.mjs <url含debug> [settleMs] [fpsMs]  # FPS/DrawCall/三角面/控制台错误探针
 node scripts/qa2.mjs <baseUrl含debug> <curtail.png> <optimize.png>  # 联动/闭环证据注入器
 ```
 
@@ -50,7 +51,7 @@ src/
               CableNetwork · WindVeil · Substation · WorldTerrain · SkyAurora · SparkleGround
               Callouts(防重叠/避让HUD) · CameraRig(13节点+书签+跳过) · Effects(三档) · PerfGovernor · EnvSetup · frameBus
   hud/        Hud.tsx(1920×1080 等比舞台：KPI/矩阵/雷达/图表/控制台/告警/信息卡/时间轴)
-scripts/      shot.mjs · qa2.mjs · abdiff.py · selftest.mts
+scripts/      shot.mjs · probe.mjs · qa2.mjs · abdiff.py · selftest.mts · calibrateWake.mts
 ```
 
 ## 已知边界（v3 阶段工作，非缺陷隐瞒）

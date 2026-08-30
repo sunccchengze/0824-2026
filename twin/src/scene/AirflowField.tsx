@@ -20,6 +20,8 @@ import { mulberry32 } from '../data/rng.ts'
 //     像 CFD 里的等值面，而非线框球。
 // 物理同源：基流=windAt；亏损=2a·(D/(D+2kx))²·高斯横截面（与 farmSim/HUD 同式）。
 // 视觉克制：纯青白加性、无 Bloom；HUD「三维气流场」整层开关。
+// 第 22 轮（视觉精修 pass）：烟羽 alpha 峰值 0.13→0.055 + 轴向 exp 衰减 + 深冰青色相，
+// 只动视觉层，Jensen 半径/横偏/粒子平流全部原样（数据红线不变）。
 // ============================================================================
 
 const N_SEG = 24 // 拖尾线头尾 2 顶点；烟羽管环周段数（16→24：管截面更接近正圆）
@@ -52,11 +54,14 @@ void main() {
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `
+// 第 22 轮视觉精修：烟羽管"克制化"——峰值 0.13→0.055、轴向距离衰减 exp(-ax/1000)、
+// 色相转深冰青（加性贡献降亮度），消除中排/近排线稿被灰色烟锥洗灰的问题。
+// 物理口径不变：半径仍是 Jensen 扩张，横偏仍调 wakeDeflection()，仅改视觉 alpha 分布。
 const PLUME_FRAG = /* glsl */ `
 precision mediump float;
 varying float vA;
 void main() {
-  gl_FragColor = vec4(vec3(0.30, 0.68, 0.92), vA);
+  gl_FragColor = vec4(vec3(0.16, 0.52, 0.82), vA);
 }
 `
 
@@ -120,7 +125,12 @@ export default function AirflowField() {
       }
       for (let r = 0; r < N_RING; r++) {
         const fade = 1 - r / (N_RING - 1)
-        for (let kk = 0; kk < N_SEG; kk++) paA[base + r * N_SEG + kk] = 0.13 * fade * fade
+        // 第 22 轮：ax 与 useFrame 中烟羽轴向位置同式（70 + r·(15r+46)），
+        // 附加 exp(-ax/1000) 轴向衰减——尾流核心（前 1.5 排距）保留，
+        // 远端 2 km 长尾不再覆盖近排机组与镜头前景。
+        const ax = 70 + r * (r * 15 + 46)
+        const a = 0.055 * fade * fade * Math.exp(-ax / 1000)
+        for (let kk = 0; kk < N_SEG; kk++) paA[base + r * N_SEG + kk] = a
       }
     }
     pg.setAttribute('position', new THREE.BufferAttribute(ppos, 3))
