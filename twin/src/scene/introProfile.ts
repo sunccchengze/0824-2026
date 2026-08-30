@@ -146,6 +146,28 @@ export function buildIntroProfile(
   const v: number[] = new Array(N)
   for (let i = 0; i < N; i++) v[i] = vRaw[i] * scale
 
+  // —— 第 25 轮：速度曲线二次平滑（宽窗盒式）——
+  // boost 表虽为 smoothstep C1 连续，但相邻控制点间仍有“加速-匀速-加速”的
+  // 轻微台阶感；掉帧/低帧率时在加速相交点尤其像“顿”。这里将最终速度再做
+  // 31 样本盒式平滑，让速度曲线 C1~C2 连续，任何帧率的相机都丝滑；平滑会
+  // 略微改变积分时长，因此随后重新缩放回精确 totalDur（34s）。
+  const SW = 16
+  const vSmooth: number[] = new Array(N)
+  for (let i = 0; i < N; i++) {
+    let s2 = 0
+    let n2 = 0
+    for (let j = i - SW; j <= i + SW; j++) {
+      if (j < 0 || j >= N) continue
+      s2 += v[j]
+      n2++
+    }
+    vSmooth[i] = s2 / n2
+  }
+  let dur2 = 0
+  for (let i = 0; i < N - 1; i++) dur2 += segLen[i] / ((vSmooth[i] + vSmooth[i + 1]) * 0.5)
+  const scale2 = dur2 / totalDur
+  for (let i = 0; i < N; i++) v[i] = THREE.MathUtils.clamp(vSmooth[i] * scale2, vMin, vMax)
+
   const tAt: number[] = new Array(N)
   tAt[0] = 0
   for (let i = 0; i < N - 1; i++) tAt[i + 1] = tAt[i] + segLen[i] / ((v[i] + v[i + 1]) * 0.5)

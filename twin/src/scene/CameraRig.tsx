@@ -136,6 +136,18 @@ const COAST_MAX_DRIFT = 120 // 最大漂移 (m)，防穿几何
 const FLY_TAU_ON = 0.22    // WASD 按压爬升 (s)
 const FLY_TAU_OFF = 0.9    // WASD 松手滑行 (s)
 
+// —— 第 25 轮：开场相机“目标 + 指数平滑跟随” ——
+// 关键：不再每帧硬设 position/lookAt/rotateZ（那样掉帧或加速相交点会“顿/跳”），
+// 而是每帧只“追”目标（位置 lerp、朝向 slerp、bank/fov 指数缓动）。
+// τ=0.09s：正常 60fps 完全跟得紧、无拖影；掉帧时把单帧大位移分摊到后续几帧，
+// 观感始终是连续滑行而非跳变。
+const CAM_SMOOTH_TAU = 0.09
+const _eUp = new THREE.Vector3(0, 1, 0)
+const _eLook = new THREE.Matrix4()
+const _eQuat = new THREE.Quaternion()
+const _eRoll = new THREE.Quaternion()
+const _eRollAxis = new THREE.Vector3(0, 0, 1)
+
 export default function CameraRig() {
   const controlsRef = useRef<any>(null)
   const { camera } = useThree()
@@ -155,6 +167,13 @@ export default function CameraRig() {
   const prevTgt = useRef(new THREE.Vector3())
   const coast = useRef<{ p0: THREE.Vector3; t0: THREE.Vector3; v: THREE.Vector3; vt: THREE.Vector3; t0clk: number } | null>(null)
   const flyV = useRef(new THREE.Vector3())
+
+  // —— 第 25 轮：开场平滑状态（首帧从目标初始化，避免起步跳变）——
+  const smPos = useRef(new THREE.Vector3())
+  const smLook = useRef(new THREE.Vector3())
+  const smFov = useRef(47)
+  const smBank = useRef(0)
+  const smInit = useRef(false)
 
   // WASD 飞行输入（任务#6）：按住即进入自由飞行；intro 中按飞行键=跳过+起飞
   const keys = useRef<Set<string>>(new Set())
@@ -367,23 +386,20 @@ export default function CameraRig() {
     const vTgtNow = (controlsRef.current?.target ?? HUB).clone().sub(prevTgt.current).divideScalar(dtc)
     vTgtTrack.current.lerp(vTgtNow, 0.5)
 
+    // —— 第 25 轮：计算本帧目标机位/朝向（只算目标，不直接硬设相机）——
+    let tPos: THREE.Vector3
+    let tLook: THREE.Vector3
+    let tBank: number
+    let tFov: number
     if (el < INTRO_END) {
-      // —— 巡航段：表驱动速度（直线加速 / 弯道减速 / 13 段 boost）——
+      // —— 巡航段：表驱动速度（直线加速 / 弯道减速，二次平滑后更顺）——
       const st = PROFILE.lookup(el)
-      const p = CAMERA_PATH.getPointAt(st.frac)
-      const tg = LOOK_PATH.getPointAt(st.frac)
-      camera.position.copy(p)
-      camera.lookAt(tg)
+      tPos = CAMERA_PATH.getPointAt(st.frac)
+      tLook = LOOK_PATH.getPointAt(st.frac)
       // 转弯侧倾（≤6.2°，克制）：右转(signedK>0)→右倾→rotateZ 取负
-      camera.rotateZ(-st.bank)
-      const ctl = controlsRef.current
-      // 开场期间不加 ctl.update()：OrbitControls 会重跑 lookAt(target) 抹平
-      // 侧倾 bank，且 disabled 时不允许其接管相机。只同步目标点，供结束后接管。
-      if (ctl) ctl.target.copy(tg)
-      const perspective = camera as THREE.PerspectiveCamera
+      tBank = -st.bank
       // 速度感 fov + 开场 3s 广角俯冲（54→）
-      perspective.fov = st.fov + 6 * (1 - smooth01(Math.min(1, el / 3)))
-      perspective.updateProjectionMatrix()
+      tFov = st.fov + 6 * (1 - smooth01(Math.min(1, el / 3)))
     } else {
       // —— 收尾环绕：Hermite 角轨迹，出口速度匹配接管 ——
       const e = Math.min(1, (el - INTRO_END) / ORBIT_DUR)
@@ -391,42 +407,57 @@ export default function CameraRig() {
       const om = orbitOmega(e)
       const rad = THREE.MathUtils.lerp(ORBIT_R0, ORBIT_R1, smooth01(e))
       const hubY = THREE.MathUtils.lerp(92, 96, e)
-      camera.position.set(
-        HUB.x + Math.cos(ang) * rad,
-        THREE.MathUtils.lerp(ORBIT_Y0, ORBIT_Y1, e),
-        HUB.z + Math.sin(ang) * rad,
-      )
-      const hub = new THREE.Vector3(HUB.x, hubY, HUB.z)
-      camera.lookAt(hub)
+      tPos = new THREE.Vector3(HUB.x + Math.cos(ang) * rad, THREE.MathUtils.lerp(ORBIT_Y0, ORBIT_Y1, e), HUB.z + Math.sin(ang) * rad)
+      tLook = new THREE.Vector3(HUB.x, hubY, HUB.z)
       // 环绕侧倾：a_lat = ω²R 同映射；起始 0.8s 与巡航末端 roll 交叉淡化
       const aLat = om * om * rad
-      let bankOrbit = 0.108 * Math.sqrt(THREE.MathUtils.clamp((aLat - 1.5) / 50, 0, 1))
+      const bankOrbit = 0.108 * Math.sqrt(THREE.MathUtils.clamp((aLat - 1.5) / 50, 0, 1))
       const pathExitBank = -PROFILE.lookup(INTRO_END).bank
-      bankOrbit = THREE.MathUtils.lerp(pathExitBank, bankOrbit, smooth01(Math.min(1, e / 0.09)))
-      camera.rotateZ(bankOrbit)
-      const ctlO = controlsRef.current
-      // 同上：开场期间不加 update()，仅同步目标点（保留 bank 侧倾）
-      if (ctlO) ctlO.target.copy(hub)
-      const pO = camera as THREE.PerspectiveCamera
+      tBank = THREE.MathUtils.lerp(pathExitBank, bankOrbit, smooth01(Math.min(1, e / 0.09)))
       const span = Math.max(PROFILE.vMax - PROFILE.vMin, 1e-3)
-      pO.fov = 47 + 4.5 * smooth01((om * rad - PROFILE.vMin) / span)
-      pO.updateProjectionMatrix()
+      tFov = 47 + 4.5 * smooth01((om * rad - PROFILE.vMin) / span)
+    }
+
+    // —— 平滑应用：位置/朝向/侧倾/fov 指数跟随目标 ——
+    const alpha = 1 - Math.exp(-Math.min(Math.max(delta, 0.001), 0.25) / CAM_SMOOTH_TAU)
+    if (!smInit.current) {
+      smPos.current.copy(tPos)
+      smLook.current.copy(tLook)
+      smFov.current = tFov
+      smBank.current = tBank
+      smInit.current = true
+    } else {
+      smPos.current.lerp(tPos, alpha)
+      smLook.current.lerp(tLook, alpha)
+      smFov.current += (tFov - smFov.current) * alpha
+      smBank.current += (tBank - smBank.current) * alpha
+    }
+    camera.position.copy(smPos.current)
+    // 朝向 = lookAt(target) 后绕视轴滚转 bank（先取 look 四元数，再乘 roll）
+    _eLook.lookAt(smPos.current, smLook.current, _eUp)
+    _eQuat.setFromRotationMatrix(_eLook)
+    _eRoll.setFromAxisAngle(_eRollAxis, smBank.current)
+    _eQuat.multiply(_eRoll)
+    camera.quaternion.slerp(_eQuat, alpha)
+    const perspective = camera as THREE.PerspectiveCamera
+    perspective.fov = smFov.current
+    perspective.updateProjectionMatrix()
+
+    const ctlS = controlsRef.current
+    if (ctlS) ctlS.target.copy(smLook.current)
+
+    if (el >= INTRO_TOTAL && INTRO_T_JUMP === null) {
       // 收尾完成 → 惯性滑行进自由轨道（近悬停，漂移 <10m）。
-      // 注意：`introT=` QA 冻结时不触发 coast（保持停在环绕终点复现帧），
-      // 且 coast 初始速度做上限限幅——防止首帧相机位姿未被上一帧更新时
-      // vTrack 携带巨大初值导致“交接瞬间瞬移”。
-      if (el >= INTRO_TOTAL && INTRO_T_JUMP === null) {
-        const vCap = THREE.MathUtils.clamp(PROFILE.vExit * 1.15, 1, 160)
-        const vtCap = vCap
-        const v0 = vTrack.current.length() > vCap ? vTrack.current.clone().normalize().multiplyScalar(vCap) : vTrack.current.clone()
-        const vt0 = vTgtTrack.current.length() > vtCap ? vTgtTrack.current.clone().normalize().multiplyScalar(vtCap) : vTgtTrack.current.clone()
-        coast.current = {
-          p0: camera.position.clone(),
-          t0: hub.clone(),
-          v: v0,
-          vt: vt0,
-          t0clk: 0,
-        }
+      // QA 冻结时不触发 coast；初速做上限限幅，防止首帧携带巨大速度瞬移。
+      const vCap = THREE.MathUtils.clamp(PROFILE.vExit * 1.15, 1, 160)
+      const v0 = vTrack.current.length() > vCap ? vTrack.current.clone().normalize().multiplyScalar(vCap) : vTrack.current.clone()
+      const vt0 = vTgtTrack.current.length() > vCap ? vTgtTrack.current.clone().normalize().multiplyScalar(vCap) : vTgtTrack.current.clone()
+      coast.current = {
+        p0: camera.position.clone(),
+        t0: smLook.current.clone(),
+        v: v0,
+        vt: vt0,
+        t0clk: 0,
       }
     }
 
