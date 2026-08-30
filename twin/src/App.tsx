@@ -91,8 +91,19 @@ export default function App() {
                 setFatal('WebGL 上下文丢失（显卡驱动重置或显存不足）。')
               })
               canvas.addEventListener('webglcontextrestored', () => setFatal(null))
-              requestAnimationFrame(() => setReady(true))
+              // 首帧后不立即隐藏 Loading：再等一小段预热（3 帧 + 400ms），
+              // 让 PMREM/shader 首次编译的停顿发生在 Loading 屏期间，
+              // 用户看到的第一眼就是已就绪、直接开跑的开场，不再有“首秒卡死”。
+              let warmFrames = 0
+              const warmT0 = performance.now()
+              const warm = () => {
+                warmFrames++
+                if (warmFrames >= 3 && performance.now() - warmT0 >= 400) { setReady(true); return }
+                requestAnimationFrame(warm)
+              }
+              requestAnimationFrame(warm)
               if (debugEnabled()) {
+                ;(window as unknown as Record<string, unknown>).__aeolus_cam = camera
                 ;(window as unknown as Record<string, unknown>).__aeolus_stats = () => {
                   // 手动单帧渲染计数（EffectComposer 存在时 gl.info 只反映后期 pass）
                   const prevTone = gl.toneMapping

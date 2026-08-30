@@ -1,3 +1,4 @@
+/* oxlint-disable react/immutability -- 帧循环内 mutate mat.userData/uniform 为 R3F onBeforeCompile 标准模式（docs/08 D2，与 CameraRig 同口径） */
 import { useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'

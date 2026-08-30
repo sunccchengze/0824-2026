@@ -130,6 +130,11 @@ export default function CameraRig() {
   const controlsRef = useRef<any>(null)
   const { camera } = useThree()
   const introStart = useRef<number | null>(null)
+  // 开场独立时钟：帧间增量累加（而非绝对 elapsedTime）。
+  // 首帧 PMREM/shader 编译会让 elapsed 一次性跳几秒，若直接当 el 用，
+  // 相机在开场前几秒会“瞬移数秒”造成超大卡顿——这里单帧钳到 1/30s，
+  // 渲染停顿被吸收为“原地微停”，运动保持连续丝滑。
+  const introClock = useRef(0)
   const bookmark = useRef<{ from: THREE.Vector3; fromT: THREE.Vector3; to: THREE.Vector3; toT: THREE.Vector3; t0: number } | null>(null)
 
   // —— 第 24 轮：惯性状态 ——
@@ -227,6 +232,11 @@ export default function CameraRig() {
     }
 
     const s = useSim.getState()
+    // 开场期间关闭 OrbitControls 的帧循环 update：它每帧重跑 lookAt(target)，
+    // 会抹掉巡航的 bank 侧倾，且在 damping 下产生持续的“沉降”抖动。
+    // 开场结束后再启用，交给用户拖拽/缩放。
+    const ctlAny = controlsRef.current
+    if (ctlAny && ctlAny.enabled !== s.introDone) ctlAny.enabled = s.introDone
     if (NO_INTRO && !s.introDone) {
       s.skipIntro()
       return
@@ -311,8 +321,16 @@ export default function CameraRig() {
     }
 
     const t0 = state.clock.elapsedTime
-    if (introStart.current === null) introStart.current = 0
-    const el = t0 - introStart.current
+    if (introStart.current === null) {
+      introStart.current = t0
+      introClock.current = 0
+    }
+    // 帧间增量累加，单帧钳 0.1s：首帧/PMREM/Shader 编译的“多秒级”停顿
+    // 会被吸收（不会让相机瞬移数秒），同时 30–60fps 正常帧率下完全按真实
+    // 时长推进，开场不会变慢。渲染停顿被表现为“原地微停”，运动保持连续。
+    const dtSafe = Math.min(Math.max(delta, 0.001), 0.1)
+    introClock.current += dtSafe
+    const el = introClock.current
 
     // —— track：本帧速度（供 coast 交接），带 0.5 平滑去帧时抖动 ——
     const dtc = Math.min(Math.max(delta, 0.001), 0.05)
@@ -331,10 +349,9 @@ export default function CameraRig() {
       // 转弯侧倾（≤6.2°，克制）：右转(signedK>0)→右倾→rotateZ 取负
       camera.rotateZ(-st.bank)
       const ctl = controlsRef.current
-      if (ctl) {
-        ctl.target.copy(tg)
-        ctl.update()
-      }
+      // 开场期间不加 ctl.update()：OrbitControls 会重跑 lookAt(target) 抹平
+      // 侧倾 bank，且 disabled 时不允许其接管相机。只同步目标点，供结束后接管。
+      if (ctl) ctl.target.copy(tg)
       const perspective = camera as THREE.PerspectiveCamera
       // 速度感 fov + 开场 3s 广角俯冲（54→）
       perspective.fov = st.fov + 6 * (1 - smooth01(Math.min(1, el / 3)))
@@ -360,7 +377,8 @@ export default function CameraRig() {
       bankOrbit = THREE.MathUtils.lerp(pathExitBank, bankOrbit, smooth01(Math.min(1, e / 0.09)))
       camera.rotateZ(bankOrbit)
       const ctlO = controlsRef.current
-      if (ctlO) { ctlO.target.copy(hub); ctlO.update() }
+      // 同上：开场期间不加 update()，仅同步目标点（保留 bank 侧倾）
+      if (ctlO) ctlO.target.copy(hub)
       const pO = camera as THREE.PerspectiveCamera
       const span = Math.max(PROFILE.vMax - PROFILE.vMin, 1e-3)
       pO.fov = 47 + 4.5 * smooth01((om * rad - PROFILE.vMin) / span)
