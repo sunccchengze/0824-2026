@@ -106,9 +106,12 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
   const outerRef = useRef<THREE.Group>(null!)
   const streakRef = useRef<THREE.Mesh>(null!)
   const softRef = useRef<THREE.Mesh>(null!)
+  const discRef = useRef<THREE.Mesh>(null!)
+  const discOuterRef = useRef<THREE.Mesh>(null!)
   const streakMatRef = useRef<THREE.MeshBasicMaterial>(null!)
   const softMatRef = useRef<THREE.MeshBasicMaterial>(null!)
   const discMatRef = useRef<THREE.MeshBasicMaterial>(null!)
+  const discOuterMatRef = useRef<THREE.MeshBasicMaterial>(null!)
 
   const { streakGeo, discGeo, softGeo, streakTex, discTex } = useMemo(() => {
     const { streak, disc } = getSharedTextures()
@@ -155,6 +158,20 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
       map: discTex ?? undefined,
       transparent: true,
       opacity: 0.5,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+      toneMapped: false,
+      side: THREE.DoubleSide,
+    })
+  }, [discTex])
+
+  const discOuterMat = useMemo(() => {
+    return new THREE.MeshBasicMaterial({
+      color: SHADOW_COLOR,
+      map: discTex ?? undefined,
+      transparent: true,
+      opacity: 0.22,
       depthWrite: false,
       depthTest: false,
       fog: false,
@@ -210,14 +227,28 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
     if (discMatRef.current) {
       discMatRef.current.opacity = discOp
     }
+    if (discOuterMatRef.current) {
+      discOuterMatRef.current.opacity = discOp * 0.42
+    }
   })
 
   return (
     <group ref={outerRef} position={[x, y, z]}>
+      {/* 外层接地柔影：更大更淡，俯视也可见 */}
+      <mesh
+        ref={discOuterRef}
+        geometry={discGeo}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.42, 0]}
+        scale={[34, 34, 1]}
+        renderOrder={6}
+      >
+        <primitive object={discOuterMat} ref={discOuterMatRef} attach="material" />
+      </mesh>
       {/* 接地圆盘：塔基锚点，正午也可见 - 加大 */}
       <mesh
+        ref={discRef}
         geometry={discGeo}
-        material={discMat}
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.55, 0]}
         scale={[18, 18, 1]}
