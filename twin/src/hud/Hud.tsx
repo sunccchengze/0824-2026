@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useSim } from '../state/simStore'
+import { getTelemetry, useSim } from '../state/simStore'
 
 // ================================================================
 // 未来能源数字孪生系统 —— 大屏 HUD（原图 1920×1080 像素级还原）
@@ -223,8 +223,8 @@ function Alarms() {
     <div className="alist">
       {alarms.map((a) => (
         <div key={a.id} className="ait">
-          <i className={`adot ${a.kind}`} />
-          <div className="atext"><b>{a.zh}</b><em>{a.en}</em></div>
+          <i className={`adot ${a.severity}`} />
+          <div className="atext"><b>{a.turbine} · {a.zh}</b><em>{a.en}</em></div>
           <span className="atime">{a.minutes}分钟前</span>
         </div>
       ))}
@@ -290,6 +290,8 @@ export default function Hud() {
   const playing = useSim((s) => s.playing)
   const togglePlay = useSim((s) => s.togglePlay)
   const tHours = useSim((s) => s.tHours)
+  const servos = useSim((s) => s.servos)
+  const telemetry = getTelemetry(tHours, servos)
   const setAlarms = useSim((s) => s.setAlarms)
 
   // 时钟动画（rAF 驱动 store）
@@ -340,27 +342,27 @@ export default function Hud() {
         {/* ===== 左列 ===== */}
         <div className="col left">
           <Panel title="全场功率总览" en="(MWh)">
-            <div className="kpi-xl">479,731</div>
+            <div className="kpi-xl">{telemetry.totalPower.toFixed(1)}</div>
           </Panel>
 
           <div className="row2">
             <Panel title="电网频率" en="(Hz)">
-              <div className="kpi-md">50.02</div>
+              <div className="kpi-md">{telemetry.frequency.toFixed(2)}</div>
             </Panel>
             <Panel title="无功功率" en="(MVar)">
-              <div className="kpi-md">19</div>
+              <div className="kpi-md">{telemetry.reactivePower.toFixed(1)}</div>
             </Panel>
           </div>
 
           <Panel title="运行机组数">
-            <div className="kpi-row"><span className="kpi-xl sm">9</span><span className="unit">台</span></div>
+            <div className="kpi-row"><span className="kpi-xl sm">{telemetry.runningUnits}</span><span className="unit">台</span></div>
           </Panel>
 
           <Panel title="电网功率" en="(NPI)" tall>
             <div className="donuts">
-              <NpiDonut pct={70} label="瞬时功率" />
-              <NpiDonut pct={99} label="成功率" />
-              <NpiDonut pct={92} label="传输效率" />
+              <NpiDonut pct={telemetry.npi[0]} label="瞬时功率" />
+              <NpiDonut pct={telemetry.npi[1]} label="成功率" />
+              <NpiDonut pct={telemetry.npi[2]} label="传输效率" />
             </div>
           </Panel>
 

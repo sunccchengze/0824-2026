@@ -1,67 +1,80 @@
 import { create } from 'zustand'
 
-// ================================================================
-// 模拟 SCADA 状态（浏览器内代理演示）
-// 演示口径：全场年发电量 318,420 MWh / 电网频率 50.02 Hz / 无功功率 19 MVar /
-//          运行机组数 9 / NPI 70·99·92% / 偏航执行器1..5 = -10°
-// 数值仅作大屏演示；真实值口径见 docs/03（FLORIS 3×3 → +24.04%）
-// ================================================================
-
+/**
+ * 浏览器内确定性演示数据，不代表实时 SCADA 或 FLORIS 计算结果。
+ * 所有 HUD 数值都从同一时间轴和偏航输入推导，避免面板之间互相矛盾。
+ */
 export interface AlarmItem {
   id: number
-  kind: 'red' | 'cyan'
+  turbine: string
+  severity: 'high' | 'medium' | 'info'
   zh: string
   en: string
   minutes: number
 }
 
+export interface Telemetry {
+  totalPower: number
+  frequency: number
+  reactivePower: number
+  runningUnits: number
+  npi: [number, number, number]
+  windSpeed: number
+}
+
+export function getTelemetry(tHours: number, servos: number[]): Telemetry {
+  const daylight = Math.max(0, Math.sin(((tHours - 5) / 14) * Math.PI))
+  const wind = 7.2 + 2.1 * daylight + 0.35 * Math.sin(tHours * 0.7)
+  const yawLoss = servos.reduce((sum, value) => sum + Math.min(1, Math.abs(value) / 30) ** 2, 0) / Math.max(1, servos.length)
+  const available = 0.76 + daylight * 0.18
+  const totalPower = Math.round(9 * 5.0 * available * (1 - yawLoss * 0.12) * 10) / 10
+  return {
+    totalPower,
+    frequency: Math.round((50 + (totalPower - 30) * 0.004) * 100) / 100,
+    reactivePower: Math.round((12 + totalPower * 0.22) * 10) / 10,
+    runningUnits: daylight > 0.08 ? 9 : 8,
+    npi: [Math.round(70 + daylight * 18), Math.round(96 + daylight * 3), Math.round(88 + daylight * 7)],
+    windSpeed: Math.round(wind * 10) / 10,
+  }
+}
+
 export interface SimState {
-  // 5 路偏航执行器（原图 yaw=+/-10° 档），对应 turbine/SERVOS 索引
   servos: number[]
   setServo: (i: number, v: number) => void
-
-  // 时间轴（24h 巡航）
   tHours: number
   playing: boolean
   togglePlay: () => void
-
-  // 报警流水（分钟前，随时间递增）
   alarms: AlarmItem[]
   setAlarms: (a: AlarmItem[]) => void
-  // 矩阵 3×3 状态位
   matrix: boolean[]
   setMatrix: (m: boolean[]) => void
 }
 
-const M0: number[] = [-10, -10, -10, -10, -10]
+const M0 = [-10, -10, -10, -10, -10]
 const ALARM_SEED: AlarmItem[] = [
-  { id: 0, kind: 'red', zh: '过热预警', en: 'Overheat Alarm', minutes: 23 },
-  { id: 1, kind: 'cyan', zh: '过热预警', en: 'Overheat Alarm', minutes: 22 },
-  { id: 2, kind: 'red', zh: '过热预警', en: 'Overheat Alarm', minutes: 22 },
-  { id: 3, kind: 'red', zh: '过热预警', en: 'Overheat Alarm', minutes: 23 },
-  { id: 4, kind: 'cyan', zh: '过热预警', en: 'Overheat Alarm', minutes: 22 },
+  { id: 0, turbine: 'T01', severity: 'high', zh: '偏航误差', en: 'Yaw deviation', minutes: 3 },
+  { id: 1, turbine: 'T04', severity: 'medium', zh: '齿轮箱温升', en: 'Gearbox temperature', minutes: 8 },
+  { id: 2, turbine: 'T06', severity: 'info', zh: '通信恢复', en: 'Link recovered', minutes: 12 },
+  { id: 3, turbine: 'T08', severity: 'medium', zh: '风速突变', en: 'Wind ramp', minutes: 18 },
+  { id: 4, turbine: 'T09', severity: 'info', zh: '维护确认', en: 'Maintenance acknowledged', minutes: 23 },
 ]
-
-const MATRIX0: boolean[] = [true, true, true, true, true, true, true, true, true]
+const MATRIX0 = Array.from({ length: 9 }, () => true)
 
 export const useSim = create<SimState>((set) => ({
   servos: [...M0],
-  setServo: (i, v) =>
-    set((s) => {
-      const servos = [...s.servos]
-      servos[i] = v
-      return { servos }
-    }),
-
+  setServo: (i, v) => set((s) => {
+    const servos = [...s.servos]
+    servos[i] = Math.max(-30, Math.min(30, v))
+    return { servos }
+  }),
   tHours: 10,
   playing: true,
   togglePlay: () => set((s) => ({ playing: !s.playing })),
-
   alarms: [...ALARM_SEED],
   setAlarms: (a) => set({ alarms: a }),
   matrix: [...MATRIX0],
   setMatrix: (m) => set({ matrix: m }),
 }))
 
-/** 舵机 → 机组索引映射：5 路对应画面中最显著的 5 台（见 terrainUtil.FARM） */
+/** 舵机 → 机组索引映射：5 路对应画面中最显著的 5 台。 */
 export const SERVO_TID = [0, 1, 4, 6, 8] as const
