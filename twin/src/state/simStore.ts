@@ -2,6 +2,7 @@
 import { create } from 'zustand'
 import { FARM, SERVOS } from '../scene/terrainUtil'
 import { optimizeYaw, farmFrame, FARM_RATED_MW, N_UNITS, type FarmFrame } from '../data/farmSim'
+import { generateAnomalyPlan, applyAnomalyToFrame, type AnomalyPlan } from '../data/anomaly'
 
 // ================================================================
 // 全局仿真控制状态（zustand）
@@ -52,6 +53,17 @@ export interface SimState {
   // 开场巡航：可跳过（评审 C5：34s 不可跳过是答辩事故）
   introDone: boolean
   skipIntro: () => void
+
+  // 随机异常事件（每模拟日 1 次，完全随机；演示剧本）
+  anomalyCycle: number
+  anomalyPlan: AnomalyPlan | null
+  anomalyActive: AnomalyPlan | null
+  anomalyFired: boolean
+  anomalyModal: { plan: AnomalyPlan; auto: boolean } | null
+  ensureAnomalyPlan: (cycle: number) => void
+  stepAnomaly: (prevH: number, nextH: number) => void
+  repairAnomaly: (auto: boolean) => void
+  closeAnomalyModal: () => void
 
   // WebGL 兜底（D6）
   fatal: string | null
@@ -123,6 +135,47 @@ export const useSim = create<SimState>((set, get) => ({
   introDone: false,
   skipIntro: () => set({ introDone: true }),
 
+  // —— 随机异常剧本 ——
+  anomalyCycle: 0,
+  anomalyPlan: generateAnomalyPlan(0, 6),
+  anomalyActive: null,
+  anomalyFired: false,
+  anomalyModal: null,
+  ensureAnomalyPlan: (cycle) =>
+    set((s) => {
+      if (s.anomalyPlan && s.anomalyPlan.cycle === cycle) return {}
+      return { anomalyCycle: cycle, anomalyPlan: generateAnomalyPlan(cycle, s.tHours) }
+    }),
+  stepAnomaly: (prevH, nextH) =>
+    set((s) => {
+      // 只有“跨午夜的大回退”（prev≈23.x → next≈0.x）才算新一天；
+      // 用户在时间轴上小幅/任意回拖不应被当成换日（否则会丢弃当天剧本）。
+      const wrapped = nextH < prevH && prevH - nextH > 12
+      if (wrapped) {
+        const cycle = s.anomalyCycle + 1
+        return {
+          anomalyCycle: cycle,
+          anomalyPlan: generateAnomalyPlan(cycle, nextH),
+          anomalyActive: null,
+          anomalyFired: false,
+          anomalyModal: s.anomalyModal,
+        }
+      }
+      // 触发时间到点：激活一次（同日只触发一次，回拖不重新触发）
+      const p = s.anomalyPlan
+      if (!p || s.anomalyActive || s.anomalyFired) return {}
+      const crossed = nextH > prevH && p.triggerH > prevH && p.triggerH <= nextH
+      if (!crossed) return {}
+      return { anomalyActive: p, anomalyFired: true }
+    }),
+  repairAnomaly: (auto) =>
+    set((s) => {
+      const p = s.anomalyActive
+      if (!p) return {}
+      return { anomalyActive: null, anomalyModal: { plan: p, auto } }
+    }),
+  closeAnomalyModal: () => set({ anomalyModal: null }),
+
   fatal: null,
   setFatal: (m) => set({ fatal: m }),
 }))
@@ -146,7 +199,8 @@ export function startSimClock() {
     // 用户开场一结束就看到“功率下降”。开场结束后恢复播放（真实 50s=24h）。
     if (!s.introDone) return
     if (s.playing && !s.fatal) {
-      useSim.setState({ tHours: (s.tHours + dt * (24 / 50)) % 24 })
+      const nextT = (s.tHours + dt * (24 / 50)) % 24
+      useSim.setState({ tHours: nextT })
     }
   }, 100)
 }
@@ -159,10 +213,11 @@ export function useFarmFrame(): FarmFrame {
   const tHours = useSim((s) => s.tHours)
   const unitYaw = useSim((s) => s.unitYaw)
   const targetMW = useSim((s) => s.targetMW)
-  const key = `${tHours}|${unitYaw.join(',')}|${targetMW}`
+  const anomaly = useSim((s) => s.anomalyActive)
+  const key = `${tHours}|${unitYaw.join(',')}|${targetMW}|${anomaly?.id ?? ''}`
   if (key !== hudKey || !hudFrame) {
     hudKey = key
-    hudFrame = farmFrame(tHours, unitYaw, targetMW)
+    hudFrame = applyAnomalyToFrame(farmFrame(tHours, unitYaw, targetMW), anomaly)
   }
   return hudFrame
 }
@@ -170,7 +225,7 @@ export function useFarmFrame(): FarmFrame {
 /** 3D 用：每帧即时读数（useFrame 内直读，绕开 React setState） */
 export function farmFrameNow(): FarmFrame {
   const s = useSim.getState()
-  return farmFrame(s.tHours, s.unitYaw, s.targetMW)
+  return applyAnomalyToFrame(farmFrame(s.tHours, s.unitYaw, s.targetMW), s.anomalyActive)
 }
 
 /** 机组 id ↔ 下标 */

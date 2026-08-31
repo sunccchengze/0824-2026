@@ -431,6 +431,81 @@ button { font-family: inherit; }
 .skip-btn kbd { margin-left: 6px; font-family: var(--font-mono); font-size: 9px; opacity: 0.7; }
 @keyframes skipPulse { 50% { box-shadow: 0 0 14px rgba(100, 215, 255, 0.35); } }
 
+/* ===== 随机异常提示条 ===== */
+.anom-banner {
+  position: fixed; left: 50%; top: 84px; z-index: 38; width: min(720px, calc(100vw - 720px)); min-width: 430px;
+  pointer-events: auto; overflow: hidden;
+  background: linear-gradient(168deg, rgba(40, 16, 20, 0.92), rgba(18, 10, 16, 0.86) 60%, rgba(8, 8, 14, 0.82));
+  border: 1px solid rgba(255, 120, 132, 0.55);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.4), 0 0 26px rgba(255, 80, 95, .18), inset 0 0 30px rgba(255, 80, 95, .05);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  padding: 12px 16px 14px;
+  animation: anomBannerIn .55s cubic-bezier(.22,1.35,.34,1) both;
+}
+.anom-banner.lv-warn { border-color: rgba(255, 190, 110, .5); background: linear-gradient(168deg, rgba(46,34,14,.9), rgba(22,16,12,.84) 60%, rgba(10,10,12,.8)); box-shadow: 0 0 0 1px rgba(0,0,0,.35), 0 0 26px rgba(255,170,70,.14), inset 0 0 30px rgba(255,170,70,.04); }
+.anom-banner .anom-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.anom-banner .anom-dot { width: 9px; height: 9px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #ff6f7d 45%, #c01727 100%); box-shadow: 0 0 10px rgba(255,90,100,.95); animation: anomBlink 1.2s ease-in-out infinite; }
+.anom-banner.lv-warn .anom-dot { background: radial-gradient(circle at 35% 30%, #fff7e0, #ffd27f 45%, #e8941c 100%); box-shadow: 0 0 10px rgba(255,190,90,.95); }
+.anom-banner .anom-head b { font-size: 14px; letter-spacing: .16em; color: #ffe9ec; }
+.anom-banner .anom-chip { margin-left: auto; font-size: 11px; letter-spacing: .08em; color: #ffc9cf; border: 1px solid rgba(255,120,132,.4); padding: 2px 8px; }
+.anom-banner.lv-warn .anom-chip { color: #ffd9a0; border-color: rgba(255,190,110,.4); }
+.anom-banner .anom-time { font-family: var(--font-mono); font-size: 12px; color: #9cc6e2; }
+.anom-body strong { display: block; font-size: 16px; letter-spacing: .12em; color: #f6fdff; }
+.anom-body strong em { font-style: normal; margin-left: 8px; font-size: 10px; letter-spacing: .1em; color: #9cc6e2; }
+.anom-body p { margin: 6px 0 10px; font-size: 12px; line-height: 1.65; color: #c9d8e2; }
+.anom-foot { display: flex; align-items: center; justify-content: space-between; }
+.anom-auto { font-size: 11px; letter-spacing: .1em; color: #7f9db2; }
+.anom-btn {
+  cursor: pointer; pointer-events: auto; padding: 8px 20px; font-size: 13px; letter-spacing: .18em; color: #eafdff;
+  background: linear-gradient(165deg, rgba(60,160,220,.32), rgba(20,60,96,.42)); border: 1px solid rgba(150,235,255,.6);
+  transition: transform .18s cubic-bezier(.22,1.2,.4,1), box-shadow .18s, border-color .18s;
+}
+.anom-btn:hover { transform: translateY(-1px) scale(1.02); border-color: #c9f5ff; box-shadow: 0 0 18px rgba(120,225,255,.35); }
+.anom-btn:active { transform: translateY(0) scale(.98); }
+.anom-progress { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: linear-gradient(90deg, #ff6f7d, #ffd27f); transform-origin: left; animation: anomDrain 10s linear forwards; opacity: .8; }
+.anom-banner.lv-warn .anom-progress { background: linear-gradient(90deg, #ffb35c, #ffe6a8); }
+@keyframes anomBannerIn { from { opacity: 0; transform: translate(-50%, -18px) scale(.94); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+@keyframes anomDrain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@keyframes anomBlink { 50% { opacity: .35; } }
+
+/* ===== 修复结果弹窗 ===== */
+.anom-overlay {
+  position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+  background: rgba(2, 8, 14, .46); backdrop-filter: blur(3px);
+  animation: anomFade .3s ease both; pointer-events: auto;
+}
+.anom-modal {
+  width: min(680px, calc(100vw - 160px)); padding: 22px 26px 18px; position: relative;
+  background: linear-gradient(168deg, rgba(12, 34, 52, .96), rgba(5, 18, 30, .94) 55%, rgba(3, 12, 22, .95));
+  border: 1px solid rgba(140, 225, 255, .5);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.5), 0 24px 70px rgba(0,0,0,.5), 0 0 34px rgba(90,220,255,.18), inset 0 0 40px rgba(80,200,255,.06);
+  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  animation: anomModalIn .6s cubic-bezier(.2,1.35,.3,1) both;
+}
+.anom-m-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid rgba(120,210,250,.28); }
+.anom-m-head span { font-size: 18px; letter-spacing: .24em; color: #d9f6ff; text-shadow: 0 0 14px rgba(90,220,255,.4); }
+.anom-m-head button { cursor: pointer; width: 28px; height: 28px; color: #9fd8f2; background: none; border: 1px solid rgba(110,200,245,.35); transition: transform .18s, color .18s, border-color .18s; }
+.anom-m-head button:hover { color: #fff; border-color: #bdf0ff; transform: rotate(90deg); }
+.anom-m-kind { margin-bottom: 14px; }
+.anom-m-kind b { display: block; font-size: 16px; letter-spacing: .14em; color: #f2fdff; }
+.anom-m-kind em { display: block; margin-top: 3px; font-style: normal; font-size: 11px; letter-spacing: .1em; color: #79a9c8; }
+.anom-steps { list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 9px; }
+.anom-steps li {
+  counter-increment: step; position: relative; padding: 8px 12px 8px 42px; font-size: 13px; line-height: 1.6; color: #d5e9f6;
+  background: rgba(18, 48, 72, .4); border: 1px solid rgba(110, 200, 245, .16);
+  opacity: 0; transform: translateY(10px);
+  animation: anomStepIn .5s cubic-bezier(.22,1.35,.34,1) forwards;
+  animation-delay: calc(var(--i) * .16s + .08s);
+}
+.anom-steps li::before {
+  content: counter(step, decimal-leading-zero); position: absolute; left: 10px; top: 8px;
+  font-family: var(--font-mono); font-size: 12px; color: #8fe0ff; text-shadow: 0 0 8px rgba(100,220,255,.6);
+}
+.anom-m-foot { margin-top: 16px; text-align: right; font-size: 10px; letter-spacing: .14em; color: #6f9cbb; }
+@keyframes anomModalIn { from { opacity: 0; transform: translateY(24px) scale(.92); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes anomStepIn { to { opacity: 1; transform: translateY(0); } }
+@keyframes anomFade { from { opacity: 0; } to { opacity: 1; } }
+
 /* 全屏按钮（替代原装饰音量钮，D12） */
 .fbtn { cursor: pointer; width: 24px; height: 20px; font-size: 13px; line-height: 1; color: #9fd8f2; background: none; border: 1px solid rgba(110, 200, 245, 0.35); }
 .fbtn:hover { color: #eafdff; border-color: rgba(170, 240, 255, 0.8); }

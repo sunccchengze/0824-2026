@@ -3,6 +3,7 @@ import { useSim, useFarmFrame } from '../state/simStore'
 import { FARM } from '../scene/terrainUtil'
 import { UNIT_NAMEPLATE, FARM_RATED_MW } from '../data/farmSim'
 import { ROTOR_D, WAKE_K, wakeDeflection } from '../data/turbinePhysics'
+import { anomalyLabel } from '../data/anomaly'
 
 // ================================================================
 // 未来能源数字孪生系统 —— 大屏 HUD（v3：全读数接演示数据契约）
@@ -441,6 +442,105 @@ function KpiDelta({ frame }: { frame: ReturnType<typeof useFarmFrame> }) {
   )
 }
 
+/* ---------- 随机异常：事件导演（触发/自动修复/弹窗计时） ---------- */
+const ANOMALY_AUTO_MS = 10000
+const ANOMALY_MODAL_MS = 10000
+
+function AnomalyDirector() {
+  const tHours = useSim((s) => s.tHours)
+  const cycle = useSim((s) => s.anomalyCycle)
+  const anomalyActive = useSim((s) => s.anomalyActive)
+  const anomalyModal = useSim((s) => s.anomalyModal)
+  const ensureAnomalyPlan = useSim((s) => s.ensureAnomalyPlan)
+  const stepAnomaly = useSim((s) => s.stepAnomaly)
+  const repairAnomaly = useSim((s) => s.repairAnomaly)
+  const closeAnomalyModal = useSim((s) => s.closeAnomalyModal)
+  const prevT = useRef(tHours)
+
+  // 确保当前模拟日有剧本（页面加载 / 新一天换剧本）
+  useEffect(() => { ensureAnomalyPlan(cycle) }, [cycle, ensureAnomalyPlan])
+
+  // 时间推进（播放/拖轴）→ 检查触发；跨日则换新剧本
+  useEffect(() => {
+    const prev = prevT.current
+    if (Math.abs(prev - tHours) < 1e-9) return
+    stepAnomaly(prev, tHours)
+    prevT.current = tHours
+  }, [tHours, stepAnomaly])
+
+  // 异常激活后 10s 未手动修复 → 自动修复
+  useEffect(() => {
+    if (!anomalyActive) return
+    const id = window.setTimeout(() => repairAnomaly(true), ANOMALY_AUTO_MS)
+    return () => window.clearTimeout(id)
+  }, [anomalyActive, repairAnomaly])
+
+  // 修复结果弹窗 10s 后自动关闭
+  useEffect(() => {
+    if (!anomalyModal) return
+    const id = window.setTimeout(() => closeAnomalyModal(), ANOMALY_MODAL_MS)
+    return () => window.clearTimeout(id)
+  }, [anomalyModal, closeAnomalyModal])
+
+  return null
+}
+
+/* ---------- 异常提示条（顶部居中，含“修复异常情况”按钮） ---------- */
+function AnomalyBanner() {
+  const active = useSim((s) => s.anomalyActive)
+  const repairAnomaly = useSim((s) => s.repairAnomaly)
+  if (!active) return null
+  const label = anomalyLabel(active)
+  const tid = active.turbineIndex !== null ? FARM[active.turbineIndex].id : '并网点'
+  return (
+    <div className={`anom-banner lv-${active.severity}`} role="alert" aria-live="assertive">
+      <div className="anom-head">
+        <i className="anom-dot" />
+        <b>异常事件 · {label.level}</b>
+        <span className="anom-chip">强度 {label.gain}</span>
+        <span className="anom-time">{label.time}</span>
+      </div>
+      <div className="anom-body">
+        <strong>{active.titleZh}<em>{active.titleEn} · {tid}</em></strong>
+        <p>{active.descZh}</p>
+      </div>
+      <div className="anom-foot">
+        <span className="anom-auto">10s 未处理将自动修复</span>
+        <button className="anom-btn" onClick={() => repairAnomaly(false)}>修复异常情况</button>
+      </div>
+      <i className="anom-progress" />
+    </div>
+  )
+}
+
+/* ---------- 修复结果弹窗（步骤逐条浮现，10s 自动关闭） ---------- */
+function AnomalyModal() {
+  const modal = useSim((s) => s.anomalyModal)
+  const closeAnomalyModal = useSim((s) => s.closeAnomalyModal)
+  if (!modal) return null
+  const { plan, auto } = modal
+  return (
+    <div className="anom-overlay" onClick={closeAnomalyModal}>
+      <div className="anom-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <header className="anom-m-head">
+          <span>{auto ? '系统已自动完成修复' : '异常修复完成'}</span>
+          <button onClick={closeAnomalyModal} aria-label="关闭">✕</button>
+        </header>
+        <div className="anom-m-kind">
+          <b>{plan.titleZh}</b>
+          <em>{plan.titleEn}</em>
+        </div>
+        <ol className="anom-steps">
+          {plan.steps.map((st, i) => (
+            <li key={i} style={{ ['--i' as string]: i }}>{st}</li>
+          ))}
+        </ol>
+        <footer className="anom-m-foot">通报 10s 后自动关闭 · 已恢复全场运行</footer>
+      </div>
+    </div>
+  )
+}
+
 /* ---------- 主组件 ---------- */
 export default function Hud() {
   const { scale, h: stageH } = useStageScale()
@@ -599,6 +699,11 @@ export default function Hud() {
 
         <div className="demo-note">浏览器端演示数据 · 非 SCADA/FLORIS 实时值 <Badge k="演示" /></div>
       </div>
+
+      {/* 随机异常：触发/自动修复/手动修复 */}
+      <AnomalyDirector />
+      <AnomalyBanner />
+      <AnomalyModal />
     </div>
   )
 }
