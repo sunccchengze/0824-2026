@@ -184,11 +184,11 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
     const len = 38 + 130 * Math.pow(1 - sinEl, 1.35)
     const clampedLen = Math.max(32, Math.min(175, len))
 
-    // 透明度：正午也有，晨昏更浓
-    const lowBoost = (1 - sinEl) * 0.32
-    const op = dayF * (0.48 + lowBoost) // 正午 0.48，晨昏 ~0.80，乘 dayF（比之前更明显）
-    const softOp = dayF * (0.18 + lowBoost * 0.6)
-    const discOp = dayF * 0.62
+    // 透明度：正午也有，晨昏更浓 - 进一步加强以满足“任何角度明显”
+    const lowBoost = (1 - sinEl) * 0.35
+    const op = dayF * (0.62 + lowBoost) // 正午 0.62，晨昏 ~0.97，乘 dayF（3A 要求明显）
+    const softOp = dayF * (0.28 + lowBoost * 0.65)
+    const discOp = dayF * 0.78
 
     if (streakRef.current) {
       streakRef.current.scale.set(1, clampedLen, 1)
@@ -209,13 +209,13 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
 
   return (
     <group ref={outerRef} position={[x, y, z]}>
-      {/* 接地圆盘：塔基锚点，正午也可见 */}
+      {/* 接地圆盘：塔基锚点，正午也可见 - 加大 */}
       <mesh
         geometry={discGeo}
         material={discMat}
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.55, 0]}
-        scale={[15, 15, 1]}
+        scale={[18, 18, 1]}
         renderOrder={9}
       >
         <primitive object={discMat} ref={discMatRef} attach="material" />
