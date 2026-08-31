@@ -9,6 +9,7 @@ import WorldTerrain from './scene/WorldTerrain'
 import SparkleGround from './scene/SparkleGround'
 import WindVeil from './scene/WindVeil'
 import AirflowField from './scene/AirflowField'
+import GroundShadows from './scene/GroundShadows'
 import TurbineField from './scene/TurbineField'
 import CableNetwork from './scene/CableNetwork'
 import Substation from './scene/Substation'
@@ -130,6 +131,7 @@ export default function App() {
               <AirflowField />
               <CableNetwork />
               <Substation />
+              <GroundShadows />
               <TurbineField />
               <Callouts />
             </Suspense>
