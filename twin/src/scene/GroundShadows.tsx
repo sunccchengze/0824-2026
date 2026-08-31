@@ -103,15 +103,19 @@ function getSharedTextures() {
 function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
   const outerRef = useRef<THREE.Group>(null!)
   const streakRef = useRef<THREE.Mesh>(null!)
+  const softRef = useRef<THREE.Mesh>(null!)
   const streakMatRef = useRef<THREE.MeshBasicMaterial>(null!)
+  const softMatRef = useRef<THREE.MeshBasicMaterial>(null!)
   const discMatRef = useRef<THREE.MeshBasicMaterial>(null!)
 
-  const { streakGeo, discGeo, streakTex, discTex } = useMemo(() => {
+  const { streakGeo, discGeo, softGeo, streakTex, discTex } = useMemo(() => {
     const { streak, disc } = getSharedTextures()
-    const sg = new THREE.PlaneGeometry(16, 1)
+    const sg = new THREE.PlaneGeometry(14, 1)
     sg.translate(0, 0.5, 0) // 根部在原点，延伸 +Y
+    const soft = new THREE.PlaneGeometry(28, 1)
+    soft.translate(0, 0.5, 0)
     const dg = new THREE.CircleGeometry(1, 48)
-    return { streakGeo: sg, discGeo: dg, streakTex: streak, discTex: disc }
+    return { streakGeo: sg, softGeo: soft, discGeo: dg, streakTex: streak, discTex: disc }
   }, [])
 
   // 初始材质
@@ -120,6 +124,19 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
       map: streakTex ?? undefined,
       transparent: true,
       opacity: 0.55,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+      toneMapped: false,
+      side: THREE.DoubleSide,
+    })
+  }, [streakTex])
+
+  const softMat = useMemo(() => {
+    return new THREE.MeshBasicMaterial({
+      map: streakTex ?? undefined,
+      transparent: true,
+      opacity: 0.22,
       depthWrite: false,
       depthTest: false,
       fog: false,
@@ -169,14 +186,21 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
 
     // 透明度：正午也有，晨昏更浓
     const lowBoost = (1 - sinEl) * 0.32
-    const op = dayF * (0.42 + lowBoost) // 正午 0.42，晨昏 ~0.74，乘 dayF
-    const discOp = dayF * 0.55
+    const op = dayF * (0.48 + lowBoost) // 正午 0.48，晨昏 ~0.80，乘 dayF（比之前更明显）
+    const softOp = dayF * (0.18 + lowBoost * 0.6)
+    const discOp = dayF * 0.62
 
     if (streakRef.current) {
       streakRef.current.scale.set(1, clampedLen, 1)
     }
+    if (softRef.current) {
+      softRef.current.scale.set(1, clampedLen * 1.08, 1)
+    }
     if (streakMatRef.current) {
       streakMatRef.current.opacity = op
+    }
+    if (softMatRef.current) {
+      softMatRef.current.opacity = softOp
     }
     if (discMatRef.current) {
       discMatRef.current.opacity = discOp
@@ -191,23 +215,31 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
         material={discMat}
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.55, 0]}
-        scale={[14, 14, 1]}
+        scale={[15, 15, 1]}
         renderOrder={9}
       >
         <primitive object={discMat} ref={discMatRef} attach="material" />
       </mesh>
-      {/* 定向影带 */}
-      <group>
-        <mesh
-          ref={streakRef}
-          geometry={streakGeo}
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, 0.75, 0]}
-          renderOrder={8}
-        >
-          <primitive object={streakMat} ref={streakMatRef} attach="material" />
-        </mesh>
-      </group>
+      {/* 软影外晕（更宽更淡，模拟半影） */}
+      <mesh
+        ref={softRef}
+        geometry={softGeo}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.65, 0]}
+        renderOrder={7}
+      >
+        <primitive object={softMat} ref={softMatRef} attach="material" />
+      </mesh>
+      {/* 定向影带（核心） */}
+      <mesh
+        ref={streakRef}
+        geometry={streakGeo}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.78, 0]}
+        renderOrder={8}
+      >
+        <primitive object={streakMat} ref={streakMatRef} attach="material" />
+      </mesh>
     </group>
   )
 }
