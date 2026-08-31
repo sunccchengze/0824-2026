@@ -26,10 +26,10 @@ export default function Substation() {
     const t = state.clock.elapsedTime
     const flick = 0.85 + 0.15 * Math.sin(t * 0.9)
     if (lightRef.current) {
-      lightRef.current.intensity = night * (4.5 + 1.5 * flick)
+      lightRef.current.intensity = night * (12 + 4 * flick)
     }
     if (lightRef2.current) {
-      lightRef2.current.intensity = night * (2.2 + 0.8 * Math.sin(t * 0.6 + 1.2))
+      lightRef2.current.intensity = night * (7 + 2.5 * Math.sin(t * 0.6 + 1.2))
     }
   })
   const mats = useMemo(() => {

@@ -393,8 +393,9 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
     }
     if (beaconLight.current) {
       // 点光：仅夜间有效，白天强度≈0，夜间随脉冲呼吸，照亮机舱顶部与近地
-      beaconLight.current.intensity = night * (2.2 + 3.8 * pulse) * (0.6 + 0.4 * slowPulse)
-      beaconLight.current.distance = 90 + 40 * pulse
+      // 增强：强度 8-22，距离更大，让地面也能被微微照亮
+      beaconLight.current.intensity = night * (8 + 14 * pulse) * (0.6 + 0.4 * slowPulse)
+      beaconLight.current.distance = 140 + 60 * pulse
       // 颜色：正常白，告警时转红（与能量环同口径）
       const u = getFarmFrame()?.units[idx]
       if (u?.status === 'alarm') {
@@ -404,10 +405,10 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
       }
     }
     if (beaconHalo.current) {
-      const s = 1 + night * (0.8 + 0.6 * pulse)
+      const s = 1.2 + night * (1.1 + 0.9 * pulse)
       beaconHalo.current.scale.setScalar(s)
       const mat = beaconHalo.current.material as THREE.MeshBasicMaterial
-      if (mat) mat.opacity = (0.18 + 0.32 * pulse) * (0.25 + 0.75 * night)
+      if (mat) mat.opacity = (0.32 + 0.48 * pulse) * (0.35 + 0.65 * night)
     }
     const u = getFarmFrame()?.units[idx]
     if (!u) return
@@ -479,15 +480,20 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
         <lineSegments geometry={assets.merged.yawCore} material={assets.core} renderOrder={4} />
         <group position={[0, S.hubY + 3.9, S.nacelleZ - 0.2]}>
           <mesh>
-            <sphereGeometry args={[0.4, 10, 10]} />
-            <meshBasicMaterial ref={beaconMat} color={HOLO_GLOW} transparent opacity={0.6} depthWrite={false} depthTest={false} fog={false} toneMapped={false} />
+            <sphereGeometry args={[0.7, 12, 12]} />
+            <meshBasicMaterial ref={beaconMat} color={HOLO_GLOW} transparent opacity={0.85} depthWrite={false} depthTest={false} fog={false} toneMapped={false} />
           </mesh>
-          {/* 夜航信标光晕（仅夜间明显，呼吸缩放） */}
+          {/* 夜航信标光晕（仅夜间明显，呼吸缩放）- 加大 */}
           <mesh ref={beaconHalo as never} renderOrder={12}>
-            <sphereGeometry args={[1.1, 12, 12]} />
-            <meshBasicMaterial color={HOLO_GLOW} transparent opacity={0.18} depthWrite={false} depthTest={false} fog={false} toneMapped={false} blending={THREE.AdditiveBlending} />
+            <sphereGeometry args={[2.6, 14, 14]} />
+            <meshBasicMaterial color={HOLO_GLOW} transparent opacity={0.32} depthWrite={false} depthTest={false} fog={false} toneMapped={false} blending={THREE.AdditiveBlending} />
           </mesh>
-          <pointLight ref={beaconLight as never} intensity={0} distance={120} decay={2} color={HOLO_GLOW} />
+          {/* 第二层更大更柔的光晕 */}
+          <mesh renderOrder={12} scale={[2.2, 2.2, 2.2]}>
+            <sphereGeometry args={[2.6, 14, 14]} />
+            <meshBasicMaterial color={HOLO_GLOW} transparent opacity={0.12} depthWrite={false} depthTest={false} fog={false} toneMapped={false} blending={THREE.AdditiveBlending} />
+          </mesh>
+          <pointLight ref={beaconLight as never} intensity={0} distance={180} decay={2} color={HOLO_GLOW} />
         </group>
         <group position={[0, S.hubY, S.nacelleZ]} rotation={[-D2R(S.tiltDeg), 0, 0]}>
           <group ref={spin}>

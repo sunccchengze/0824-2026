@@ -20,10 +20,11 @@ function makePulseTexture(): THREE.CanvasTexture {
   c.height = S
   const ctx = c.getContext('2d')!
   const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2)
-  g.addColorStop(0, 'rgba(120,220,255,0.85)')
-  g.addColorStop(0.22, 'rgba(80,180,220,0.35)')
-  g.addColorStop(0.5, 'rgba(40,120,180,0.12)')
-  g.addColorStop(0.8, 'rgba(20,60,100,0.02)')
+  // 增强：中心更亮，外圈更柔，颜色更青白，夜间更明显
+  g.addColorStop(0, 'rgba(160,235,255,0.95)')
+  g.addColorStop(0.18, 'rgba(110,210,255,0.55)')
+  g.addColorStop(0.38, 'rgba(60,160,210,0.22)')
+  g.addColorStop(0.65, 'rgba(30,90,150,0.06)')
   g.addColorStop(1, 'rgba(0,0,0,0)')
   ctx.fillStyle = g
   ctx.fillRect(0, 0, S, S)
@@ -75,10 +76,11 @@ function Pulse({ x, z, y, phase, scaleBase }: { x: number; z: number; y: number;
     if (meshRef.current) meshRef.current.visible = true
     const breathe = 0.5 + 0.5 * Math.sin(t * 0.8 + phase)
     const slow = 0.5 + 0.5 * Math.sin(t * 0.22 + phase * 1.3)
-    const s = scaleBase * (0.85 + 0.35 * breathe) * (0.9 + 0.2 * slow)
+    const s = scaleBase * (0.85 + 0.45 * breathe) * (0.9 + 0.25 * slow)
     if (meshRef.current) meshRef.current.scale.setScalar(s)
     if (matRef.current) {
-      matRef.current.opacity = night * (0.18 + 0.32 * breathe) * (0.7 + 0.3 * slow)
+      // 增强透明度：夜间 0.45-0.85，比之前更亮
+      matRef.current.opacity = night * (0.45 + 0.55 * breathe) * (0.75 + 0.25 * slow)
     }
   })
 
