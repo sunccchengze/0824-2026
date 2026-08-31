@@ -54,7 +54,7 @@ function NpiDonut({ pct, label }: { pct: number; label: string }) {
   )
 }
 
-/* ---------- 电机塔状态矩阵 2×6 ---------- */
+/* ---------- 机组状态矩阵 3×3 ---------- */
 function Matrix() {
   const matrix = useSim((s) => s.matrix)
   const cells = matrix.map((on, i) => (
@@ -143,7 +143,7 @@ function Radar() {
 }
 
 /* ---------- 实时功率曲线（原图双线） ---------- */
-function PowerChart() {
+function PowerChart({ tHours }: { tHours: number }) {
   const d = useMemo(() => {
     const W = 292, H = 196, ML = 30, MR = 8, MT = 12, MB = 26
     const xs = (i: number) => ML + (i / 47) * (W - ML - MR)
@@ -160,8 +160,9 @@ function PowerChart() {
     }
     const line = (arr: number[]) => arr.map((y, i) => `${i === 0 ? 'M' : 'L'}${xs(i).toFixed(1)},${y.toFixed(1)}`).join(' ')
     const area = `${line(pts)} L${xs(47).toFixed(1)},${ys(0).toFixed(1)} L${xs(0).toFixed(1)},${ys(0).toFixed(1)} Z`
-    return { W, H, ML, MR, MT, MB, xs, ys, line, area, pts, fpts }
-  }, [])
+    const current = Math.min(47, Math.round((tHours / 24) * 47))
+    return { W, H, ML, MR, MT, MB, xs, ys, line, area, pts, fpts, current }
+  }, [tHours])
 
   return (
     <div className="chart">
@@ -189,7 +190,7 @@ function PowerChart() {
         <path d={d.area} fill="url(#pgrad)" />
         <path d={d.line(d.pts)} fill="none" stroke="#66dcff" strokeWidth="1.8" className="chart-glow" />
         <path d={d.line(d.fpts)} fill="none" stroke="rgba(190,235,255,.5)" strokeWidth="1.1" strokeDasharray="4 3" />
-        <circle cx={d.xs(47)} cy={d.pts[47]} r="3.2" fill="#dff6ff" className="chart-glow" />
+        <circle cx={d.xs(d.current)} cy={d.pts[d.current]} r="3.2" fill="#dff6ff" className="chart-glow" />
       </svg>
     </div>
   )
@@ -342,7 +343,7 @@ export default function Hud() {
 
         {/* ===== 左列 ===== */}
         <div className="col left">
-          <Panel title="全场功率总览" en="(MWh)">
+          <Panel title="全场实时功率" en="(MW)">
             <div className="kpi-xl">{telemetry.totalPower.toFixed(1)}</div>
           </Panel>
 
@@ -367,12 +368,12 @@ export default function Hud() {
             </div>
           </Panel>
 
-          <Panel title="电机塔状态" en="Matrix" tall>
+          <Panel title="机组状态矩阵" en="Matrix" tall>
             <Matrix />
           </Panel>
 
           <Panel title="实时功率" en="Real-time Power" tall>
-            <PowerChart />
+            <PowerChart tHours={tHours} />
           </Panel>
         </div>
 
