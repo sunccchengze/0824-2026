@@ -289,6 +289,7 @@ export default function Hud() {
   const scale = useStageScale()
   const playing = useSim((s) => s.playing)
   const togglePlay = useSim((s) => s.togglePlay)
+  const setTime = useSim((s) => s.setTime)
   const tHours = useSim((s) => s.tHours)
   const servos = useSim((s) => s.servos)
   const telemetry = getTelemetry(tHours, servos)
@@ -401,6 +402,8 @@ export default function Hud() {
           <div className="tlbar">
             <i className="tlfill" style={{ width: `${(tHours / 24) * 100}%` }} />
             <i className="tlhead" style={{ left: `${(tHours / 24) * 100}%` }} />
+            <input className="timeline-input" type="range" min="0" max="24" step="0.01" value={tHours}
+              onChange={(e) => { setTime(Number(e.target.value)); if (playing) togglePlay() }} aria-label="时间轴" />
             {[...Array(24)].map((_, i) => <i key={i} className="tick" style={{ left: `${(i / 24) * 100}%` }} />)}
           </div>
           <span className="tail">00:50</span>

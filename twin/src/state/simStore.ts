@@ -42,6 +42,7 @@ export interface SimState {
   servos: number[]
   setServo: (i: number, v: number) => void
   tHours: number
+  setTime: (hours: number) => void
   playing: boolean
   togglePlay: () => void
   alarms: AlarmItem[]
@@ -68,6 +69,7 @@ export const useSim = create<SimState>((set) => ({
     return { servos }
   }),
   tHours: 10,
+  setTime: (hours) => set({ tHours: ((hours % 24) + 24) % 24 }),
   playing: true,
   togglePlay: () => set((s) => ({ playing: !s.playing })),
   alarms: [...ALARM_SEED],

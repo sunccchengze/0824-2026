@@ -234,6 +234,8 @@ button { font-family: inherit; }
 .play .pause { width: 7px; height: 9px; border-left: 3px solid #bfeaff; border-right: 3px solid #bfeaff; }
 .clock { font-family: var(--font-mono); font-size: 15px; color: #9fe6ff; min-width: 44px; letter-spacing: 0.06em; }
 .tlbar { position: relative; flex: 1; height: 5px; }
+.timeline-input { position: absolute; inset: -8px 0; width: 100%; height: 21px; opacity: 0; cursor: pointer; margin: 0; z-index: 2; }
+.timeline-input:focus-visible { opacity: .18; outline: 1px solid var(--cyan); }
 .tlbar::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 2px; transform: translateY(-50%); background: rgba(70, 130, 175, 0.35); }
 .tlfill { position: absolute; left: 0; top: 50%; height: 2px; transform: translateY(-50%); background: linear-gradient(90deg, rgba(30, 120, 180, 0.7), #66dcff); box-shadow: 0 0 8px rgba(100, 215, 255, 0.8); }
 .tlhead { position: absolute; top: 50%; width: 12px; height: 12px; transform: translate(-50%, -50%); border-radius: 50%; border: 2px solid #eaffe; background: radial-gradient(circle at 35% 30%, #fff, #7fdcff 45%, #1d9fd8); box-shadow: 0 0 10px rgba(110, 220, 255, 0.95); }
