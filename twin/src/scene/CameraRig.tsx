@@ -72,6 +72,12 @@ const CAM_SMOOTH_TAU = 0.09
 const _eUp = new THREE.Vector3(0, 1, 0)
 const _eLook = new THREE.Matrix4()
 const _eQuat = new THREE.Quaternion()
+// 复用目标/自由飞行临时对象，避免热身路径每帧 new Vector3 触发 GC
+const _tPos = new THREE.Vector3()
+const _tLook = new THREE.Vector3()
+const _dir = new THREE.Vector3()
+const _right = new THREE.Vector3()
+const _mv = new THREE.Vector3()
 
 export default function CameraRig() {
   const controlsRef = useRef<any>(null)
@@ -137,10 +143,6 @@ export default function CameraRig() {
   useFrame((state, delta) => {
     if (!controlsRef.current) controlsRef.current = (state.controls as any) || null
     const ctl = controlsRef.current
-    if (DEBUG_ALLOWED) {
-      ;(window as unknown as Record<string, unknown>).__aeolus_ctlT = ctl?.target.toArray() ?? null
-      ;(window as unknown as Record<string, unknown>).__aeolus_ctlE = ctl?.enabled ?? null
-    }
 
     if (DEBUG_CAM) {
       if (ctl) ctl.enabled = true
@@ -193,6 +195,14 @@ export default function CameraRig() {
     }
 
     if (s.introDone) {
+      // 开场中途跳过（Esc / 点击 / 键1-3 / WASD）时，introDone 立即为 true，
+      // 但 OrbitControls 在巡航期间一直 disabled，内部球坐标是陈旧值。
+      // 若不先把 controls.target/update() 同步到当前平滑注视点，用户第一次拖动
+      // 会先“回弹/跳一下”（round25 曾修、借来的分支已丢掉此逻辑）。
+      if (ctl && !ctl.enabled) {
+        ctl.target.copy(smLook.current)
+        ctl.update()
+      }
       if (ctl) ctl.enabled = true
       // WASD 自由飞行
       const k = keys.current
@@ -201,22 +211,16 @@ export default function CameraRig() {
       const lift = (k.has('Space') ? 1 : 0) - (k.has('KeyC') ? 1 : 0)
       if (fwd || strafe || lift) {
         const v = (k.has('ShiftLeft') || k.has('ShiftRight') ? 620 : 240) * Math.min(0.05, delta)
-        const dir = new THREE.Vector3()
-        camera.getWorldDirection(dir)
-        const right = new THREE.Vector3().crossVectors(dir, camera.up).normalize()
-        const mv = new THREE.Vector3()
-        mv.addScaledVector(dir, fwd * v)
-        mv.addScaledVector(right, strafe * v)
-        mv.y += lift * v * 0.8
-        const ny = camera.position.y + mv.y
-        if (ny > 14 && ny < 4600) {
-          camera.position.add(mv)
-          if (ctl) { ctl.target.add(mv); ctl.update() }
-        } else {
-          mv.y = 0
-          camera.position.add(mv)
-          if (ctl) { ctl.target.add(mv); ctl.update() }
-        }
+        camera.getWorldDirection(_dir)
+        _right.crossVectors(_dir, camera.up).normalize()
+        _mv.set(0, 0, 0)
+        _mv.addScaledVector(_dir, fwd * v)
+        _mv.addScaledVector(_right, strafe * v)
+        _mv.y += lift * v * 0.8
+        const ny = camera.position.y + _mv.y
+        if (ny < 14 || ny > 4600) _mv.y = 0
+        camera.position.add(_mv)
+        if (ctl) { ctl.target.add(_mv); ctl.update() }
       }
       return
     }
@@ -242,8 +246,9 @@ export default function CameraRig() {
     const u = ease(Math.min(1, el / INTRO_TOTAL))
 
     // —— 计算本帧目标机位/朝向/侧倾/fov（先算，再平滑应用）——
-    let tPos: THREE.Vector3
-    let tLook: THREE.Vector3
+    // 复用 _tPos/_tLook（CAMERA_PATH.getPoint 会覆写目标向量，不新建对象）
+    let tPos = _tPos
+    let tLook = _tLook
     let tFov: number
     if (u >= PATH_FRAC) {
       // —— 收尾环绕：从后侧经西侧绕到叶轮正面 ——
@@ -251,13 +256,13 @@ export default function CameraRig() {
       const ang = THREE.MathUtils.lerp(ORBIT_A0, ORBIT_A1, e)
       const rad = THREE.MathUtils.lerp(ORBIT_R0, ORBIT_R1, e)
       const hubY = THREE.MathUtils.lerp(92, 96, e)
-      tPos = new THREE.Vector3(HUB.x + Math.cos(ang) * rad, THREE.MathUtils.lerp(ORBIT_Y0, ORBIT_Y1, e), HUB.z + Math.sin(ang) * rad)
-      tLook = new THREE.Vector3(HUB.x, hubY, HUB.z)
+      tPos.set(HUB.x + Math.cos(ang) * rad, THREE.MathUtils.lerp(ORBIT_Y0, ORBIT_Y1, e), HUB.z + Math.sin(ang) * rad)
+      tLook.set(HUB.x, hubY, HUB.z)
       tFov = 47
     } else {
       const progress = u / PATH_FRAC
-      tPos = CAMERA_PATH.getPoint(progress)
-      tLook = LOOK_PATH.getPoint(progress)
+      CAMERA_PATH.getPoint(progress, tPos)
+      LOOK_PATH.getPoint(progress, tLook)
       tFov = THREE.MathUtils.lerp(52, 47, progress)
     }
 
@@ -282,14 +287,6 @@ export default function CameraRig() {
     perspective.updateProjectionMatrix()
     const ctlS = controlsRef.current
     if (ctlS) ctlS.target.copy(smLook.current)
-
-    // DEBUG-only 滚动记录：仅用于本地无头复核交接帧（真实播放，非冻结帧）。
-    if (DEBUG_ALLOWED && typeof window !== 'undefined') {
-      const w = window as unknown as { __introBuf?: Array<number[]> }
-      const buf = w.__introBuf ?? (w.__introBuf = [])
-      buf.push([el, camera.position.x, camera.position.y, camera.position.z, camera.quaternion.x, camera.quaternion.y, camera.quaternion.z, camera.quaternion.w])
-      if (buf.length > 400) buf.shift()
-    }
 
     if (el >= INTRO_TOTAL && !useSim.getState().introDone) {
       useSim.getState().skipIntro()
