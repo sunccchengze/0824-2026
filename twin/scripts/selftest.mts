@@ -6,6 +6,7 @@
 import {
   farmFrame, optimizeYaw, windAt, FARM_RATED_MW,
 } from '../src/data/farmSim.ts'
+import { useSim } from '../src/state/simStore.ts'
 import { powerCurveKw, yawFactor, wakeDeficit, TILT_F, wakeDeflection } from '../src/data/turbinePhysics.ts'
 import { FARM, SUBSTATION, terrainHeight, terrainSurfaceY } from '../src/scene/terrainUtil.ts'
 
@@ -228,6 +229,36 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
   let diff = 0
   for (const u of FARM) diff = Math.max(diff, Math.abs(terrainSurfaceY(u.x, u.z) - terrainHeight(u.x, u.z)))
   ok('V&V terrainSurfaceY 确实带台地/碎化加工（非恒等）', diff > 1, `机位最大偏移=${diff.toFixed(2)} m`)
+}
+
+// 16. 第 29 轮回归：异常剧本跨午夜沿用（2026-09-01 修复）
+// 旧实现：换日无条件换新剧本 → 触发时刻 wrap 到 0~6 点（当前时刻起 24h 内）
+// 的剧本在午夜被整个丢弃 → 当天异常被跳过，首现可能拖到 24h+。
+{
+  const S = useSim
+  const base = { ...S.getState() }
+  const mkPlan = (triggerH: number, cycle: number) => ({ ...(base.anomalyPlan as object), triggerH, cycle })
+  // A：触发时刻 2.0（新一天清晨，仍在未来）→ 跨午夜沿用旧剧本，不换
+  S.setState({ anomalyPlan: mkPlan(2.0, 0), anomalyActive: null, anomalyFired: false, anomalyCycle: 0, tHours: 23.9 })
+  S.getState().stepAnomaly(23.9, 0.05)
+  ok('异常跨日沿用：触发时刻仍在未来 → 沿用旧剧本（不丢当天异常）',
+    S.getState().anomalyPlan!.triggerH === 2.0 && S.getState().anomalyCycle === 0,
+    `triggerH=${S.getState().anomalyPlan!.triggerH} cycle=${S.getState().anomalyCycle}`)
+  // A2：沿用后，新一天跨过 2.0 → 正常触发
+  S.setState({ tHours: 1.9 })
+  S.getState().stepAnomaly(1.9, 2.05)
+  ok('沿用剧本在新一天到点触发', S.getState().anomalyFired === true)
+  // B：触发时刻 0.02 已过去 → 换日换新剧本（cycle+1）
+  S.setState({ anomalyPlan: mkPlan(0.02, 0), anomalyActive: null, anomalyFired: false, anomalyCycle: 0, tHours: 23.9 })
+  S.getState().stepAnomaly(23.9, 0.05)
+  ok('异常跨日：触发时刻已过去 → 生成新剧本（cycle+1）',
+    S.getState().anomalyCycle === 1 && S.getState().anomalyPlan!.cycle === 1,
+    `cycle=${S.getState().anomalyCycle}`)
+  // C：当天已触发 → 换日照常换新剧本（“同日只触发一次”语义不受影响）
+  S.setState({ anomalyPlan: mkPlan(2.0, 1), anomalyActive: null, anomalyFired: true, anomalyCycle: 1, tHours: 23.9 })
+  S.getState().stepAnomaly(23.9, 0.05)
+  ok('异常跨日：已触发过 → 照常换新剧本', S.getState().anomalyCycle === 2)
+  S.setState(base) // 还原初始状态
 }
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)

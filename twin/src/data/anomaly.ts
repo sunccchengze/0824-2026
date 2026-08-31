@@ -7,8 +7,8 @@
 // 诚实边界：这是浏览器端确定性演示剧本（随页面加载随机生成），非真实 SCADA 事件。
 // ============================================================================
 
-import { FARM } from '../scene/terrainUtil'
-import { FARM_RATED_MW, type FarmFrame, type UnitFrame } from './farmSim'
+import { FARM } from '../scene/terrainUtil.ts'
+import { FARM_RATED_MW, type FarmFrame, type UnitFrame } from './farmSim.ts'
 
 export type AnomalyKind = 'grid' | 'offline' | 'temp' | 'yaw' | 'pitch' | 'comm'
 export type AnomalySeverity = 'warn' | 'crit'

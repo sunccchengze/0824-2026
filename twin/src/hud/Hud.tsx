@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSim, useFarmFrame } from '../state/simStore'
 import { FARM } from '../scene/terrainUtil'
 import { UNIT_NAMEPLATE, FARM_RATED_MW } from '../data/farmSim'
@@ -62,17 +62,20 @@ function Panel({ title, en, badge, children, tall, cls }: { title: string; en?: 
 function MetricDonut({ pct, label, sub, display }: { pct: number; label: string; sub?: string; display?: string }) {
   const r = 24, c = 2 * Math.PI * r
   const p = Math.max(0, Math.min(100, pct))
+  // BUG-FIX：三环各渲染一次 <linearGradient id="ndGrad"> → 同一 DOM 里 3 个重复 id
+  //（无效 HTML，且改其中一个渐变会连带另外两个）。useId 保证每环独立。
+  const gid = useId()
   return (
     <div className="donut">
       <svg width="74" height="74" viewBox="0 0 74 74" role="img" aria-label={`${label} ${display ?? p.toFixed(0) + '%'}`}>
         <defs>
-          <linearGradient id="ndGrad" x1="0" y1="0" x2="1" y2="1">
+          <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stopColor="#8fe9ff" />
             <stop offset="1" stopColor="#3d8fc0" />
           </linearGradient>
         </defs>
         <circle cx="37" cy="37" r={r} fill="rgba(8,26,40,.6)" stroke="rgba(70,130,170,.4)" strokeWidth="6" />
-        <circle cx="37" cy="37" r={r} fill="none" stroke="url(#ndGrad)" strokeWidth="6"
+        <circle cx="37" cy="37" r={r} fill="none" stroke={`url(#${gid})`} strokeWidth="6"
           strokeDasharray={`${(p / 100) * c} ${c}`} strokeLinecap="butt"
           transform="rotate(-90 37 37)" className="ring-glow" />
         <text x="37" y="41" textAnchor="middle" className="donut-num">{display ?? `${p.toFixed(0)}%`}</text>

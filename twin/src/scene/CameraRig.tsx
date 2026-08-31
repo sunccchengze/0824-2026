@@ -120,12 +120,16 @@ export default function CameraRig() {
   // 全局快捷键：Esc 跳过 / 1-3 书签
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // BUG-FIX：与 WASD 同口径——输入控件聚焦时不抢键（旧实现焦点在滑杆上
+      // 按 1/2/3 会触发机位跳变；按住数字键 repeat 还会反复重启过渡）
+      const tag = (e.target as HTMLElement | null)?.tagName
+      const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON'
       const s = useSim.getState()
-      if (e.key === 'Escape' || e.key === ' ' || e.key.toLowerCase() === 'y') {
+      if (!inField && (e.key === 'Escape' || e.key === ' ' || e.key.toLowerCase() === 'y')) {
         if (!s.introDone) s.skipIntro()
       }
       const n = Number(e.key)
-      if (n >= 1 && n <= CAM_BOOKMARKS.length) {
+      if (!inField && !e.repeat && n >= 1 && n <= CAM_BOOKMARKS.length) {
         const b = CAM_BOOKMARKS[n - 1]
         const p = camera.position.clone()
         const ctl = controlsRef.current

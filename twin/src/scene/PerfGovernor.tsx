@@ -17,7 +17,7 @@ export default function PerfGovernor() {
   const { gl } = useThree()
   const ema = useRef(16)
   const acc = useRef(0)
-  const frozen = useRef(false)
+  // 开场结束时刻（惰性记录）：0 = 开场尚未结束
   const introEndAt = useRef(0)
   const lock = useRef<string | null>(
     typeof location !== 'undefined'
@@ -42,13 +42,12 @@ export default function PerfGovernor() {
     // 开场运镜期间（以及结束后 4s）冻结画质自适应：
     // 首段 shader 编译/PMREM 常见几秒高帧时，若立即 high→medium→low 连续降档，
     // EffectComposer 与 Canvas dpr 会各重建一次，真机上正是“开场两次黑屏”的来源。
-    if (!s.introDone || performance.now() - introEndAt.current < 4000) {
-      if (!frozen.current && s.introDone) {
-        frozen.current = true
-        introEndAt.current = performance.now()
-      }
-      return
-    }
+    // BUG-FIX：旧实现 introEndAt 只在冻结分支内赋值、而分支进入条件又依赖
+    // introEndAt 已有值（鸡生蛋）——“开场后 4s 缓冲”从未生效，开场一结束
+    // 画质自适应立即可翻档。改为 introDone 首帧惰性记录结束时刻。
+    if (!s.introDone) return
+    if (!introEndAt.current) introEndAt.current = performance.now()
+    if (performance.now() - introEndAt.current < 4000) return
     const cur = ORDER.indexOf(s.quality)
     if (ema.current > 22 && cur > 0) {
       s.setQuality(ORDER[cur - 1] as 'low' | 'medium' | 'high')

@@ -1,8 +1,8 @@
 /* oxlint-disable react/globals -- startSimClock 是模块级外部时钟驱动，非组件内可变全局（docs/08 D2） */
 import { create } from 'zustand'
-import { FARM, SERVOS } from '../scene/terrainUtil'
-import { optimizeYaw, farmFrame, FARM_RATED_MW, N_UNITS, type FarmFrame } from '../data/farmSim'
-import { generateAnomalyPlan, applyAnomalyToFrame, type AnomalyPlan } from '../data/anomaly'
+import { FARM, SERVOS } from '../scene/terrainUtil.ts'
+import { optimizeYaw, farmFrame, FARM_RATED_MW, N_UNITS, type FarmFrame } from '../data/farmSim.ts'
+import { generateAnomalyPlan, applyAnomalyToFrame, type AnomalyPlan } from '../data/anomaly.ts'
 
 // ================================================================
 // 全局仿真控制状态（zustand）
@@ -82,10 +82,12 @@ export const useSim = create<SimState>((set, get) => ({
   seek: (h) => set({ tHours: ((h % 24) + 24) % 24 }),
 
   unitYaw: [...ZERO_YAW],
+  // 量程与滑杆（±30）/寻优候选（±30）统一——旧值 ±40 是不可达的死余量，
+  // 一旦有路径写入 >30 会出现“滑杆顶死 30 而 store 存 34.5”的显示/指令分歧
   setUnitYaw: (i, v) =>
     set((s) => {
       const unitYaw = [...s.unitYaw]
-      unitYaw[i] = Math.max(-40, Math.min(40, v))
+      unitYaw[i] = Math.max(-30, Math.min(30, v))
       return { unitYaw }
     }),
 
@@ -152,6 +154,12 @@ export const useSim = create<SimState>((set, get) => ({
       // 用户在时间轴上小幅/任意回拖不应被当成换日（否则会丢弃当天剧本）。
       const wrapped = nextH < prevH && prevH - nextH > 12
       if (wrapped) {
+        const p = s.anomalyPlan
+        // BUG-FIX：旧剧本触发时刻若仍在未来（跨午夜 wrap 到 0~6 点的情形），
+        // 换日会把它整个丢弃 → 当天异常被跳过、首次异常可能拖到 24h+ 才出现
+        // （违背 generateAnomalyPlan 的“从当前起 24h 内必现”契约）。
+        // 未触发过且触发时刻仍在前方 → 沿用旧剧本；否则才生成新剧本。
+        if (p && !s.anomalyActive && !s.anomalyFired && p.triggerH > nextH) return {}
         const cycle = s.anomalyCycle + 1
         return {
           anomalyCycle: cycle,
