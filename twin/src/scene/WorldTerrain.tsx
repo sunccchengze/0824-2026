@@ -198,10 +198,15 @@ export default function WorldTerrain() {
   useFrame((state) => {
     const uu = mat.userData.u as { uTime: { value: number }; uWind: { value: THREE.Vector2 }; uGlow: { value: number }; uDayF: { value: number } }
     uu.uTime.value = state.clock.elapsedTime
-    // 夜间波前增亮再收（用户第 24 轮：夜间棱柱侧面青蓝发亮最突兀）
-    // 白天上限 0.72→0.60，夜间下限 0.34→0.12
-    uu.uGlow.value = 0.08 + 0.52 * skyState.dayF
-    uu.uDayF.value = skyState.dayF
+    // 夜间生机：波前辉光夜间不再压到 0.08，而是 0.18 + 呼吸 0.12×sin，地面有微弱脉动
+    // 白天 0.60 保持原有，夜间 0.18~0.30 呼吸，避免死寂
+    const t = state.clock.elapsedTime
+    const dayF = skyState.dayF
+    const night = 1 - dayF
+    const breathe = 0.5 + 0.5 * Math.sin(t * 0.55)
+    const nightGlow = 0.18 + 0.12 * breathe
+    uu.uGlow.value = dayF * 0.60 + night * nightGlow
+    uu.uDayF.value = dayF
     const { fromDeg } = windAt(useSim.getState().tHours)
     const th = (fromDeg * Math.PI) / 180
     uu.uWind.value.set(Math.sin(th), Math.cos(th)) // 风的去向（北来→+z）

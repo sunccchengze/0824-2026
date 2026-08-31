@@ -343,6 +343,7 @@ function buildMerged(): Merged {
 // 帧注入走 frameBus（TurbineField 每帧推一次，9 机共享）
 import { getFarmFrame } from './frameBus'
 import { useSim } from '../state/simStore'
+import { skyState } from './lightState'
 
 // ---------------------------------------------------------------------------
 // 单个机组
@@ -356,6 +357,8 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
   const root = useRef<THREE.Group>(null!)
   const spin = useRef<THREE.Group>(null!)
   const beaconMat = useRef<THREE.MeshBasicMaterial>(null!)
+  const beaconLight = useRef<THREE.PointLight>(null!)
+  const beaconHalo = useRef<THREE.Mesh>(null!)
   const ringMat = useRef<THREE.MeshBasicMaterial>(null!)
   const spinRef = useRef(0)
 
@@ -378,8 +381,33 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
     assets.halo.color.copy(selected ? GOLD_HALO : HOLO_GLOW)
     assets.rib.color.copy(selected ? GOLD_RIB : HOLO_PURE)
     ;(assets.shell.uniforms.uTint.value as THREE.Vector3).set(selected ? 1.5 : 1, selected ? 1.06 : 1, selected ? 0.42 : 1)
+    // 夜间生机：航空障碍灯夜间增强 + 点光源 + 光晕缩放
+    const dayF = skyState.dayF
+    const night = 1 - dayF
+    const pulse = Math.pow(0.5 + 0.5 * Math.sin(t * 2.1 + idx * 1.7), 3) // 慢闪，0.33Hz，错相
+    const slowPulse = 0.5 + 0.5 * Math.sin(t * 0.7 + idx * 0.9)
     if (beaconMat.current) {
-      beaconMat.current.opacity = 0.3 + 0.7 * Math.pow(0.5 + 0.5 * Math.sin(t * 3.2 + idx * 1.7), 3)
+      // 白天：0.3+0.7*pow 维持原有；夜晚：基底 0.55 + 脉冲 0.95，且整体更亮
+      const base = 0.3 + 0.7 * Math.pow(0.5 + 0.5 * Math.sin(t * 3.2 + idx * 1.7), 3)
+      beaconMat.current.opacity = base * (0.55 + 0.95 * night) + night * 0.35 * pulse
+    }
+    if (beaconLight.current) {
+      // 点光：仅夜间有效，白天强度≈0，夜间随脉冲呼吸，照亮机舱顶部与近地
+      beaconLight.current.intensity = night * (2.2 + 3.8 * pulse) * (0.6 + 0.4 * slowPulse)
+      beaconLight.current.distance = 90 + 40 * pulse
+      // 颜色：正常白，告警时转红（与能量环同口径）
+      const u = getFarmFrame()?.units[idx]
+      if (u?.status === 'alarm') {
+        beaconLight.current.color.copy(ALARM_RED)
+      } else {
+        beaconLight.current.color.copy(HOLO_GLOW)
+      }
+    }
+    if (beaconHalo.current) {
+      const s = 1 + night * (0.8 + 0.6 * pulse)
+      beaconHalo.current.scale.setScalar(s)
+      const mat = beaconHalo.current.material as THREE.MeshBasicMaterial
+      if (mat) mat.opacity = (0.18 + 0.32 * pulse) * (0.25 + 0.75 * night)
     }
     const u = getFarmFrame()?.units[idx]
     if (!u) return
@@ -449,10 +477,18 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
         <mesh geometry={assets.merged.yawShell} material={assets.shell} renderOrder={1} castShadow />
         <lineSegments geometry={assets.merged.yawHalo} material={assets.halo} renderOrder={3} />
         <lineSegments geometry={assets.merged.yawCore} material={assets.core} renderOrder={4} />
-        <mesh position={[0, S.hubY + 3.9, S.nacelleZ - 0.2]}>
-          <sphereGeometry args={[0.4, 10, 10]} />
-          <meshBasicMaterial ref={beaconMat} color={HOLO_GLOW} transparent opacity={0.6} depthWrite={false} depthTest={false} fog={false} toneMapped={false} />
-        </mesh>
+        <group position={[0, S.hubY + 3.9, S.nacelleZ - 0.2]}>
+          <mesh>
+            <sphereGeometry args={[0.4, 10, 10]} />
+            <meshBasicMaterial ref={beaconMat} color={HOLO_GLOW} transparent opacity={0.6} depthWrite={false} depthTest={false} fog={false} toneMapped={false} />
+          </mesh>
+          {/* 夜航信标光晕（仅夜间明显，呼吸缩放） */}
+          <mesh ref={beaconHalo as never} renderOrder={12}>
+            <sphereGeometry args={[1.1, 12, 12]} />
+            <meshBasicMaterial color={HOLO_GLOW} transparent opacity={0.18} depthWrite={false} depthTest={false} fog={false} toneMapped={false} blending={THREE.AdditiveBlending} />
+          </mesh>
+          <pointLight ref={beaconLight as never} intensity={0} distance={120} decay={2} color={HOLO_GLOW} />
+        </group>
         <group position={[0, S.hubY, S.nacelleZ]} rotation={[-D2R(S.tiltDeg), 0, 0]}>
           <group ref={spin}>
             <mesh geometry={assets.merged.rotorShell} material={assets.shell} renderOrder={1} castShadow />

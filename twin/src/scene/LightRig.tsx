@@ -34,6 +34,9 @@ export default function LightRig() {
   const sunRef = useRef<THREE.DirectionalLight>(null!)
   const keyNight = useRef<THREE.DirectionalLight>(null!)
   const hemiRef = useRef<THREE.HemisphereLight>(null!)
+  const fillA = useRef<THREE.DirectionalLight>(null!)
+  const fillB = useRef<THREE.DirectionalLight>(null!)
+  const fillC = useRef<THREE.DirectionalLight>(null!)
   const { scene } = useThree()
 
   const shadowOn = quality !== 'low'
@@ -91,9 +94,14 @@ export default function LightRig() {
     if (keyNight.current) keyNight.current.intensity = 0.62 * (0.3 + 0.7 * night)
     if (hemiRef.current) {
       // 白天压半球光 → 阴影对比更"真实"（不糊成一片）
-      hemiRef.current.intensity = 0.42 + 0.24 * fd
+      // 进一步压低白天半球光 0.42+0.24fd → 0.32+0.12fd，让真实阴影贴图对比度更高
+      hemiRef.current.intensity = 0.32 + 0.12 * fd
       hemiRef.current.color.setHex(0x123448).lerp(new THREE.Color(0x8fb6d0), fd * 0.75)
     }
+    // 夜基补光白天让位更彻底：白天强度 ×0.35，夜间保持原有，阴影不被冲淡
+    if (fillA.current) fillA.current.intensity = 0.13 * (0.35 + 0.65 * night)
+    if (fillB.current) fillB.current.intensity = 0.16 * (0.35 + 0.65 * night)
+    if (fillC.current) fillC.current.intensity = 0.26 * (0.35 + 0.65 * night)
     if (scene.fog && (scene.fog as THREE.FogExp2).isFogExp2) {
       (scene.fog as THREE.FogExp2).color.copy(C_NIGHT_FOG).lerp(C_DAY_FOG, fd * 0.62)
     }
@@ -105,11 +113,11 @@ export default function LightRig() {
   return (
     <>
       <hemisphereLight ref={hemiRef} args={['#123448', '#010408', 0.42]} />
-      {/* 夜基补光（v3 构图基准，白天按 fd 让位） */}
-      <directionalLight position={[700, 900, -500]} intensity={0.13} color="#a8d9ff" />
-      <directionalLight position={[-600, 500, 900]} intensity={0.16} color="#3f88b8" />
+      {/* 夜基补光（v3 构图基准，白天按 fd 让位，阴影对比度优化） */}
+      <directionalLight ref={fillA} position={[700, 900, -500]} intensity={0.13} color="#a8d9ff" />
+      <directionalLight ref={fillB} position={[-600, 500, 900]} intensity={0.16} color="#3f88b8" />
       <directionalLight ref={keyNight} position={[-750, 1250, -650]} intensity={0.85} color="#d6e6ff" />
-      <directionalLight position={[500, 420, 1150]} intensity={0.26} color="#86b8dc" />
+      <directionalLight ref={fillC} position={[500, 420, 1150]} intensity={0.26} color="#86b8dc" />
       {/* 主灯：太阳/月亮连续混合，全场唯一阴影源 */}
       <directionalLight
         ref={sunRef}

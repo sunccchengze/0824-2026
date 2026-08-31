@@ -70,27 +70,40 @@ void main() {
   col += vec3(0.06, 0.17, 0.24) * pow(clamp(1.0 - abs(h), 0.0, 1.0), 3.0) * exp(-max(h, 0.0) * 2.4) * upperHemisphere * 0.38;
 
   // 极光带：保留原图方向与冰青色，只作为真实云银河纹理之上的动态叠层
+  // 夜间生机增强：极光随夜色呼吸，强度 ×(1-uDay)，并加入慢速正弦呼吸
+  float night = 1.0 - uDay;
   float sect = smoothstep(0.22, 0.86, cos(az - 0.72));
   float bandC = 0.08 + 0.036 * (az - 0.62);
   float band = smoothstep(0.075, 0.008, abs(h - bandC));
   float rays = fbm(vec2(az * 17.0, h * 42.0 - uTime * 0.06));
   float drift = fbm(vec2(az * 3.0 + uTime * 0.015, h * 4.0));
-  float aur = band * sect * smoothstep(0.26, 0.70, drift) * (0.36 + 1.05 * rays);
+  float breathe = 0.85 + 0.35 * sin(uTime * 0.08 + az * 2.3) + 0.15 * sin(uTime * 0.21 + az * 5.7);
+  float aur = band * sect * smoothstep(0.26, 0.70, drift) * (0.36 + 1.05 * rays) * breathe;
+  // 夜间极光强度提升，白天几乎消失
+  aur *= (0.25 + 0.85 * night);
   vec3 aurCol = mix(vec3(0.40, 0.84, 0.95), vec3(0.14, 0.48, 0.84), clamp((h - 0.02) * 10.0, 0.0, 1.0));
-  col += aurCol * aur * 1.45;
-  col += aurCol * sect * exp(-abs(h) * 11.0) * 0.16;
+  // 夜间再叠一层更冷的青白，呼吸感更强
+  vec3 aurColNight = mix(aurCol, vec3(0.55, 0.92, 1.0), 0.35 * night * (0.6 + 0.4 * sin(uTime * 0.12)));
+  col += aurColNight * aur * (1.45 + night * 0.9);
+  col += aurCol * sect * exp(-abs(h) * 11.0) * (0.16 + night * 0.22) * breathe;
 
   // 纹理自带真实星场，保留少量动态星点让数字孪生画面仍有呼吸感
+  // 夜间生机：星点闪烁更快、更多层次，且随夜色呼吸亮度
   vec2 sp = d.xz / max(0.18, d.y + 0.28);
   vec2 cell = floor(sp * 300.0);
   float star = step(0.9880, hash(cell));
-  float tw = 0.55 + 0.45 * sin(uTime * 1.6 + hash(cell + 7.7) * 40.0);
-  col += vec3(0.70, 0.86, 1.0) * star * tw * smoothstep(0.03, 0.22, h) * 0.20 * (1.0 - uDay);
+  float tw = 0.55 + 0.45 * sin(uTime * (1.6 + night * 0.8) + hash(cell + 7.7) * 40.0);
+  col += vec3(0.70, 0.86, 1.0) * star * tw * smoothstep(0.03, 0.22, h) * (0.20 + night * 0.18) * (1.0 - uDay * 0.3);
   // 第二层更密更暗的微星：夜空星辰数量增加，但单颗更弱，不抢线稿
   vec2 cell2 = floor(sp * 620.0 + 31.7);
   float star2 = step(0.9915, hash(cell2));
-  float tw2 = 0.5 + 0.5 * sin(uTime * 1.1 + hash(cell2 + 3.3) * 55.0);
-  col += vec3(0.66, 0.82, 1.0) * star2 * tw2 * smoothstep(0.02, 0.20, h) * 0.11 * (1.0 - uDay);
+  float tw2 = 0.5 + 0.5 * sin(uTime * (1.1 + night * 0.7) + hash(cell2 + 3.3) * 55.0);
+  col += vec3(0.66, 0.82, 1.0) * star2 * tw2 * smoothstep(0.02, 0.20, h) * (0.11 + night * 0.12) * (1.0 - uDay * 0.2);
+  // 第三层：夜间极稀疏高亮星，偶发闪烁，增加“生机”
+  vec2 cell3 = floor(sp * 180.0 + 9.3);
+  float star3 = step(0.9965, hash(cell3));
+  float tw3 = pow(0.5 + 0.5 * sin(uTime * 2.4 + hash(cell3 + 19.1) * 70.0), 3.0);
+  col += vec3(0.85, 0.95, 1.0) * star3 * tw3 * smoothstep(0.04, 0.24, h) * 0.32 * night;
 
   // 极光带整体随白昼淡出（物理上不严格，但"克制"优先：白天不抢戏）
   col -= col * 0.0; // no-op 保持行号稳定

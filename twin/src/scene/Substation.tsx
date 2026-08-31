@@ -1,6 +1,8 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { SUBSTATION, terrainSurfaceY } from './terrainUtil'
+import { skyState } from './lightState'
 
 // ============================================================================
 // 升压站（v3：比例与要素修正 —— docs/07 A8）
@@ -17,6 +19,19 @@ const C_EDGE = new THREE.Color(0.5, 1.35, 1.72)
 const C_CORE = new THREE.Color(0.95, 1.85, 2.2)
 
 export default function Substation() {
+  const lightRef = useRef<THREE.PointLight>(null!)
+  const lightRef2 = useRef<THREE.PointLight>(null!)
+  useFrame((state) => {
+    const night = 1 - skyState.dayF
+    const t = state.clock.elapsedTime
+    const flick = 0.85 + 0.15 * Math.sin(t * 0.9)
+    if (lightRef.current) {
+      lightRef.current.intensity = night * (4.5 + 1.5 * flick)
+    }
+    if (lightRef2.current) {
+      lightRef2.current.intensity = night * (2.2 + 0.8 * Math.sin(t * 0.6 + 1.2))
+    }
+  })
   const mats = useMemo(() => {
     const mkAdd = (o: THREE.MeshBasicMaterialParameters) =>
       new THREE.MeshBasicMaterial({ blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, ...o })
@@ -127,6 +142,9 @@ export default function Substation() {
           <boxGeometry args={[1, 7.4, 1]} />
         </mesh>
       )))}
+      {/* 夜间生机：升压站点光，照亮站区，夜晚可见 */}
+      <pointLight ref={lightRef} position={[0, 18, 0]} intensity={0} distance={220} decay={2} color="#8fd4ff" />
+      <pointLight ref={lightRef2} position={[-W / 2 + 17, 10, -D / 2 + 10]} intensity={0} distance={120} decay={2} color="#b8e8ff" />
     </group>
   )
 }

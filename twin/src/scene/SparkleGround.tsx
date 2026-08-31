@@ -4,6 +4,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { FARM, SUBSTATION, terrainSurfaceY } from './terrainUtil'
 import { mulberry32 } from '../data/rng'
+import { skyState } from './lightState'
 
 // W3 星光铺地：谷地 + 电缆走廊两处加密（基准图地面冰晶微光）。
 // D2/D11 修复：散布随机量改用 seed 派生 PRNG（StrictMode 双渲染/截图
@@ -14,12 +15,17 @@ attribute float aSize;
 varying float vTwinkle;
 varying vec3 vColor;
 uniform float uTime;
+uniform float uDayF;
 void main() {
   vColor = color;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  float tw = 0.42 + 0.58 * (0.5 + 0.5 * sin(uTime * 1.5 + aPhase * 40.0));
-  vTwinkle = tw;
-  gl_PointSize = min(aSize * tw * (600.0 / -mv.z), 7.5);
+  // 夜间闪烁更快更明显，白天收敛
+  float night = 1.0 - uDayF;
+  float tw = 0.42 + 0.58 * (0.5 + 0.5 * sin(uTime * (1.5 + night * 0.9) + aPhase * 40.0));
+  // 夜间点尺寸更大，呼吸感更强
+  float sizeBoost = 1.0 + night * (0.55 + 0.25 * sin(uTime * 0.6 + aPhase * 12.0));
+  vTwinkle = tw * sizeBoost;
+  gl_PointSize = min(aSize * tw * sizeBoost * (600.0 / -mv.z), 7.5 + night * 2.5);
   gl_Position = projectionMatrix * mv;
 }
 `
@@ -27,11 +33,16 @@ const FRAG = /* glsl */ `
 precision highp float;
 varying float vTwinkle;
 varying vec3 vColor;
+uniform float uDayF;
 void main() {
   float d = length(gl_PointCoord - 0.5);
   float a = smoothstep(0.5, 0.08, d) * vTwinkle;
+  float night = 1.0 - uDayF;
   // 第 19 轮：地面星光是三角块"蓝绿边缘"的另一来源，整体压暗（增益 1.35→0.85、alpha 0.75→0.42）
-  gl_FragColor = vec4(vColor * 0.85, a * 0.42);
+  // 夜间生机：亮度提升，青白更明显
+  float gain = 0.85 + night * 0.55;
+  float alphaMul = 0.42 + night * 0.38;
+  gl_FragColor = vec4(vColor * gain, a * alphaMul);
 }
 `
 
@@ -72,7 +83,7 @@ export default function SparkleGround({ count = 4600 }: { count?: number }) {
     g.setAttribute('color', new THREE.BufferAttribute(col, 3))
     const m = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { uTime: { value: 0 } },
+      uniforms: { uTime: { value: 0 }, uDayF: { value: 1 } },
       transparent: true, depthWrite: false,
       blending: THREE.AdditiveBlending, vertexColors: true,
     })
@@ -84,6 +95,9 @@ export default function SparkleGround({ count = 4600 }: { count?: number }) {
     built.mat.dispose()
   }, [built])
 
-  useFrame((s) => { built.mat.uniforms.uTime.value = s.clock.elapsedTime })
+  useFrame((s) => {
+    built.mat.uniforms.uTime.value = s.clock.elapsedTime
+    built.mat.uniforms.uDayF.value = skyState.dayF
+  })
   return <points geometry={built.geo} material={built.mat} frustumCulled={false} />
 }
