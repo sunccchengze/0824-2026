@@ -1,6 +1,7 @@
 import { useSim } from '../state/simStore'
 import { FARM, SERVOS, terrainHeight } from './terrainUtil'
 import HoloTurbine from './HoloTurbine'
+import GroundBladeShadow from './GroundBladeShadow'
 
 // ============================================================================
 // 真实 NREL 5MW 几何 × 全息材质
@@ -17,7 +18,9 @@ export default function TurbineField() {
         const servoIdx = SERVOS.indexOf(i)
         const yawDeg = servoIdx >= 0 ? servos[servoIdx] : 0
         return (
-          <HoloTurbine
+          <group key={u.id}>
+            <GroundBladeShadow x={u.x} z={u.z} y={terrainHeight(u.x, u.z)} />
+            <HoloTurbine
             key={u.id}
             x={u.x}
             z={u.z}
@@ -26,6 +29,7 @@ export default function TurbineField() {
             speed={u.speed}
             servo={servoIdx >= 0}
           />
+          </group>
         )
       })}
     </group>
