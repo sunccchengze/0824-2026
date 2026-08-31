@@ -9,6 +9,7 @@ import { windAt } from '../data/farmSim.ts'
 import { wakeDeficit } from '../data/turbinePhysics.ts'
 import { sampleWorldU, floris3DBound, type FlorisCase } from '../data/florisData.ts'
 import { useSim } from '../state/simStore'
+import { skyState } from './lightState'
 
 /** 北来风时按上游行（row0）偏航选择最接近的 FLORIS 3D 场工况 */
 function fcOf(yawDeg: number): FlorisCase {
@@ -64,9 +65,10 @@ const FRAG = /* glsl */ `
 precision highp float;
 varying float vB;
 uniform vec3 uColor;
+uniform float uBrite;
 void main() {
   float d = length(gl_PointCoord - 0.5);
-  float a = smoothstep(0.5, 0.1, d) * vB;
+  float a = smoothstep(0.5, 0.1, d) * vB * uBrite;
   gl_FragColor = vec4(uColor * 1.6, a);
 }
 `
@@ -137,7 +139,7 @@ export default function WindVeil() {
     g.setAttribute('aBright', new THREE.BufferAttribute(aBright, 1))
     const m = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { uColor: { value: new THREE.Color('#7fd2f2') } },
+      uniforms: { uColor: { value: new THREE.Color('#7fd2f2') }, uBrite: { value: 1 } },
       transparent: true, depthWrite: false,
       // 2026-08-29 根因：旧 depthTest:false 让远端粒子流不被山体遮挡，投影成
       // 悬浮光带（用户实拍"飘环"的另一半来源）。粒子贴地飞行，遮挡就该发生。
@@ -167,6 +169,9 @@ export default function WindVeil() {
     const brightAttr = built.points.geometry.attributes.aBright as THREE.BufferAttribute
     const bArr = brightAttr.array as Float32Array
     // 风场口径（每帧一次）：仿真时刻的来流 + 偏航指令 → 真场工况或解析尾流
+    // B2 夜晚生机：夜间风痕微光（+40% 亮度、~16s 慢呼吸），白天恒 1 零影响
+    built.mat.uniforms.uBrite.value =
+      1 + 0.4 * (1 - skyState.dayF) * (0.7 + 0.3 * Math.sin(t * 0.4))
     const st0 = useSim.getState()
     const { u: baseU, fromDeg } = windAt(st0.tHours)
     const yaw9 = st0.unitYaw

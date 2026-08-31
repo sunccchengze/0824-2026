@@ -75,7 +75,9 @@ void main() {
   float band = smoothstep(0.075, 0.008, abs(h - bandC));
   float rays = fbm(vec2(az * 17.0, h * 42.0 - uTime * 0.06));
   float drift = fbm(vec2(az * 3.0 + uTime * 0.015, h * 4.0));
-  float aur = band * sect * smoothstep(0.26, 0.70, drift) * (0.36 + 1.05 * rays);
+  // B2 夜晚生机：极光整体低频呼吸（~57s 周期 ±14%），夜里天际不再“定帧”
+  float breath = 0.86 + 0.14 * sin(uTime * 0.11);
+  float aur = band * sect * smoothstep(0.26, 0.70, drift) * (0.36 + 1.05 * rays) * breath;
   vec3 aurCol = mix(vec3(0.40, 0.84, 0.95), vec3(0.14, 0.48, 0.84), clamp((h - 0.02) * 10.0, 0.0, 1.0));
   col += aurCol * aur * 1.45;
   col += aurCol * sect * exp(-abs(h) * 11.0) * 0.16;

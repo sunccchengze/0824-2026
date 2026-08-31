@@ -6,6 +6,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import {
   getTurbineGeos, TURBINE_SPEC as S, PERIM, STATIONS, TOWER_PROFILE, towerRadiusAtY,
 } from './turbine/geometry'
+import { skyState } from './lightState'
 
 // ============================================================================
 // AEOLUS — 全息纯白线稿风机（v3：合批 + 物理朝向 + 状态语义）
@@ -379,7 +380,13 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
     assets.rib.color.copy(selected ? GOLD_RIB : HOLO_PURE)
     ;(assets.shell.uniforms.uTint.value as THREE.Vector3).set(selected ? 1.5 : 1, selected ? 1.06 : 1, selected ? 0.42 : 1)
     if (beaconMat.current) {
-      beaconMat.current.opacity = 0.3 + 0.7 * Math.pow(0.5 + 0.5 * Math.sin(t * 3.2 + idx * 1.7), 3)
+      // B2 夜晚生机：夜间转为航空障碍灯式慢闪（2.4s 周期、9 机相位错开依次亮过全场），
+      // 白天保持原有克制微闪。颜色保持冰青白——红色语义只留给告警（docs/04 红线）。
+      const night = 1 - skyState.dayF
+      const fast = Math.pow(0.5 + 0.5 * Math.sin(t * 3.2 + idx * 1.7), 3)
+      const slow = Math.pow(0.5 + 0.5 * Math.sin((t * Math.PI * 2) / 2.4 + idx * 1.9), 2.2)
+      beaconMat.current.opacity =
+        (0.3 + 0.7 * fast) * (1 - night) + (0.15 + 0.85 * slow) * night
     }
     const u = getFarmFrame()?.units[idx]
     if (!u) return

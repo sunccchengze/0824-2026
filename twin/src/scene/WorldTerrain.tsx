@@ -201,6 +201,8 @@ export default function WorldTerrain() {
     // 夜间波前增亮再收（用户第 24 轮：夜间棱柱侧面青蓝发亮最突兀）
     // 白天上限 0.72→0.60，夜间下限 0.34→0.12
     uu.uGlow.value = 0.08 + 0.52 * skyState.dayF
+    // B2 夜晚生机：夜间波前辉光低频呼吸（~27s 周期，夜间 ±28%），白天零影响
+    uu.uGlow.value += (1 - skyState.dayF) * 0.045 * (0.5 + 0.5 * Math.sin(state.clock.elapsedTime * 0.23))
     uu.uDayF.value = skyState.dayF
     const { fromDeg } = windAt(useSim.getState().tHours)
     const th = (fromDeg * Math.PI) / 180
