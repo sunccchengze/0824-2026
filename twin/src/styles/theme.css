@@ -455,6 +455,27 @@ button { font-family: inherit; }
 .fatal-card em { display: block; margin-top: 12px; font-style: normal; font-size: 9.5px; color: #6f8698; letter-spacing: 0.1em; }
 .canvas-wrap { position: fixed; inset: 0; z-index: 1; }
 
+/* ---- 横屏窄高适配（1280×720 / 1366×768 等）：固定 1920 布局会溢出 ----
+   右列可用高 = 视口高 - top78 - bottom58；720 下仅 584px，而 radar+pservo(≥420)+alarms(≥96)
+   加上间距远超可用高，导致偏航底部按钮被裁剪/与报警面板重叠。此断点压缩面板并允许内区滚动。 */
+@media (orientation: landscape) and (max-height: 820px) and (min-width: 900px) {
+  .col { gap: 8px; }
+  .col.left { width: 300px; }
+  .col.right { width: 282px; }
+  .panel { padding: 7px 9px 9px; }
+  .ptitle { padding-bottom: 5px; margin-bottom: 6px; }
+  .ptitle .zh { font-size: 13px; }
+  .kpi-xl { font-size: 42px; }
+  .kpi-xl.sm { font-size: 36px; }
+  .kpi-md { font-size: 32px; }
+  .pchart { min-height: 104px; }
+  .pchart .pbody .chart { min-height: 72px; }
+  .panel.pservo { min-height: 300px; }
+  .panel.pservo .servos { min-height: 96px; }
+  .servos { height: 112px; gap: 7px; padding: 4px 6px 2px 2px; }
+  .palarms { min-height: 72px; }
+}
+
 /* ---- 窄竖屏适配（D6/C8）：舞台整体缩放安全呈现 + 横屏提示 ---- */
 @media (orientation: portrait) and (max-width: 760px) {
   body { background: radial-gradient(120% 90% at 50% 30%, #06141f 0%, #020810 70%, #01050a 100%); }

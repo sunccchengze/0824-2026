@@ -1,7 +1,7 @@
 /* oxlint-disable react/globals -- startSimClock 是模块级外部时钟驱动，非组件内可变全局（docs/08 D2） */
 import { create } from 'zustand'
 import { FARM, SERVOS } from '../scene/terrainUtil'
-import { optimizeYaw, farmFrame, N_UNITS, type FarmFrame } from '../data/farmSim'
+import { optimizeYaw, farmFrame, FARM_RATED_MW, N_UNITS, type FarmFrame } from '../data/farmSim'
 
 // ================================================================
 // 全局仿真控制状态（zustand）
@@ -85,14 +85,22 @@ export const useSim = create<SimState>((set, get) => ({
   runOptimize: () => {
     const s = get()
     const r = optimizeYaw(s.tHours, s.unitYaw)
+    // 口径诚实化：optimizeYaw 的 baseMW/totalMW 都是「满发、不限功率」口径，
+    // 且 baseMW 是「当前偏航」而非「零偏航基准」——因此增益表示的是
+    // 由用户当前偏航 → 代理最优偏航的满发收益，不是「较指令前目标功率收益」，
+    // 限功率时实际可用收益会被目标功率约束削平。
     const delta = r.totalMW - r.baseMW
+    const capped = s.targetMW < FARM_RATED_MW
+    const capNote = capped
+      ? `（当前限至 ${s.targetMW.toFixed(1)} MW，实际收益受功率指令约束）`
+      : '（不限功率/满发口径）'
     set({
       unitYaw: r.unitYaw,
       optimizeStamp: Date.now(),
       optimizeNote:
         delta > 0.005
-          ? `寻优完成：全场 ${(r.totalMW * 1000).toFixed(0)} kW（较指令前 +${(delta * 1000).toFixed(0)} kW / +${r.gainPct.toFixed(1)}%）【演示·Jensen 代理】`
-          : `当前偏航已处于代理模型极值附近，增益不足 ${(Math.max(0, delta) * 1000).toFixed(0)} kW【演示·Jensen 代理】`,
+          ? `寻优完成：满发口径全场 ${(r.totalMW * 1000).toFixed(0)} kW，由当前偏航 → 代理最优 +${(delta * 1000).toFixed(0)} kW / +${r.gainPct.toFixed(1)}%${capNote}【演示·Jensen 代理】`
+          : `当前偏航已处于代理模型最优附近，满发口径增益 ${(Math.max(0, delta) * 1000).toFixed(0)} kW${capNote}【演示·Jensen 代理】`,
     })
   },
   resetYaw: () =>
