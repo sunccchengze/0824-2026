@@ -51,9 +51,9 @@ function makeStreakTexture(): THREE.CanvasTexture {
         if (v < 0.15) a *= 0.85 + 0.15 * (1 - v / 0.15)
       }
       const idx = (y * W + x) * 4
-      d[idx] = 0
-      d[idx + 1] = 0
-      d[idx + 2] = 0
+      d[idx] = 255
+      d[idx + 1] = 255
+      d[idx + 2] = 255
       d[idx + 3] = Math.round(a * 255)
     }
   }
@@ -75,12 +75,12 @@ function makeDiscTexture(): THREE.CanvasTexture {
   c.height = S
   const ctx = c.getContext('2d')!
   const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2)
-  // 中心最暗，向外快速衰减，边缘完全透明
-  g.addColorStop(0, 'rgba(0,0,0,0.95)')
-  g.addColorStop(0.28, 'rgba(0,0,0,0.55)')
-  g.addColorStop(0.55, 'rgba(0,0,0,0.18)')
-  g.addColorStop(0.82, 'rgba(0,0,0,0.04)')
-  g.addColorStop(1, 'rgba(0,0,0,0)')
+  // 中心最暗，向外快速衰减，边缘完全透明 - 用白色+alpha，由材质 color 着色为深蓝黑
+  g.addColorStop(0, 'rgba(255,255,255,0.95)')
+  g.addColorStop(0.28, 'rgba(255,255,255,0.55)')
+  g.addColorStop(0.55, 'rgba(255,255,255,0.18)')
+  g.addColorStop(0.82, 'rgba(255,255,255,0.04)')
+  g.addColorStop(1, 'rgba(255,255,255,0)')
   ctx.fillStyle = g
   ctx.fillRect(0, 0, S, S)
   const tex = new THREE.CanvasTexture(c)
@@ -89,6 +89,8 @@ function makeDiscTexture(): THREE.CanvasTexture {
   tex.magFilter = THREE.LinearFilter
   return tex
 }
+
+const SHADOW_COLOR = new THREE.Color('#08101e')
 
 // 共享纹理（模块级单例，client only）
 let sharedStreak: THREE.CanvasTexture | null = null
@@ -118,9 +120,10 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
     return { streakGeo: sg, softGeo: soft, discGeo: dg, streakTex: streak, discTex: disc }
   }, [])
 
-  // 初始材质
+  // 初始材质 - 用深蓝黑而非纯黑，混合后色相可辨，3A 更明显
   const streakMat = useMemo(() => {
     return new THREE.MeshBasicMaterial({
+      color: SHADOW_COLOR,
       map: streakTex ?? undefined,
       transparent: true,
       opacity: 0.55,
@@ -134,6 +137,7 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
 
   const softMat = useMemo(() => {
     return new THREE.MeshBasicMaterial({
+      color: SHADOW_COLOR,
       map: streakTex ?? undefined,
       transparent: true,
       opacity: 0.22,
@@ -147,6 +151,7 @@ function GroundShadow({ x, z, y }: { x: number; z: number; y: number }) {
 
   const discMat = useMemo(() => {
     return new THREE.MeshBasicMaterial({
+      color: SHADOW_COLOR,
       map: discTex ?? undefined,
       transparent: true,
       opacity: 0.5,
