@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "selftest": "node --experimental-strip-types scripts/selftest.mts",
+    "test": "npm run selftest",
     "preview": "vite preview"
   },
   "dependencies": {

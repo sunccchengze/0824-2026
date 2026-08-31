@@ -19,5 +19,14 @@
 - wrangler 4.125.0 可用；npm 核验：n8ao 2.0.1、@takram/three-atmosphere 0.19.1、@gltf-transform/cli 4.4.2、camera-controls 3.1.2、echarts 6.1.0、uplot 1.6.32、maath 0.10.8、gsap 3.15.0
 - Cloudflare Pages 硬约束登记：单文件 ≤25MiB、20,000 文件、带宽免费；Workers Static Assets 为官方新推荐（迁移零成本预留）
 
-## 🚦 当前状态
-方案冻结，等待 Phase 1 开工指令（见 02 文档 §7）。
+## 🚦 当前状态（2026-08-28）
+**v3 演示平台已交付**：`twin/`（AEOLUS TWIN）。docs/07 评审 + docs/08 合并清单全部 P0/P1 修复并实测验收：
+构建 0 错误、lint 0 警告、数据契约自检 22/22、35 draw calls、联动闭环有截图证据（docs/research/shots/after_*.png）。
+数据口径三分法（真实/演示/示意）已上界面角标与 README。文档索引补充：
+
+| 文件 | 内容 |
+|---|---|
+| [docs/07_全面评审报告_问题清单与优先级.md](docs/07_全面评审报告_问题清单与优先级.md) | 第二轮全面评审（A-E 五类 63 项） |
+| [docs/08_合并评审_最终清单.md](docs/08_合并评审_最终清单.md) | **权威清单（终版）**：复核裁决 + 逐项修复证据 + 验收门槛对照 |
+| [docs/research/shots/](docs/research/shots/) | 历轮截图证据链（含本轮 before/after 对拍） |
+| [twin/README.md](twin/README.md) | 演示平台运行/自检/调试键/口径说明 |

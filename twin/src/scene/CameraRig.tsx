@@ -1,79 +1,48 @@
-import { useRef } from 'react'
+/* oxlint-disable react/immutability -- 帧循环内 mutate refs/camera 为 R3F 控制标准模式（docs/08 D2） */
+import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
-import { FARM } from './terrainUtil'
+import { CAM, FARM } from './terrainUtil'
+import { useSim } from '../state/simStore'
+import {
+  CAMERA_PATH, LOOK_PATH, INTRO_END,
+} from './introProfile'
 
 // ============================================================================
-// 无人机航拍开场（按指定路线设计）
-//
-// 1 → 正上空俯瞰整个阵列
-// 2 → 保持视线向下，竖直俯冲
-// 3 → 镜头上抬并向后倒退，拉到全景
-// 4 → 快速前推到 9 号风机
-// 5 → 在 9 号处转头，对准 1-5-9 对角线
-// 6 → 沿对角线穿过 5 号，飞向 1 号并停住
-//
-// 关键：相机位置、观察目标、视场都只沿一条连续曲线推进。没有两段式
-// smoothstep、没有中间 reset、没有节点硬切，因此速度和视线在每个动作点
-// 都连续衔接。9×3 阵列在世界中对应：789 / 456 / 123。
+// 开场巡航 + 机位书签 + 自由飞行（丝滑无抖动版）
+// ----------------------------------------------------------------------------
+//  · 34s + 9s 环绕全局单一时间基（ease 缓入缓出，C1 连续，无停顿、无摆动、无抖动）；
+//  · 消除前 5 秒黑屏与 180 度翻转：高空俯冲注视点稳定朝向风场中轴，远离垂直奇异点；
+//  · 巡航期间禁用 OrbitControls 抢镜；巡航/环绕结束后平滑交接；
+//  · 保持视平线稳定，移除造成摇晃抖动的侧倾(bank)与速度阶跃；
+//  · 书签机位：键 1/2/3 = 全景 / 近排 / 升压站；
+//  · WASD 自由飞行支持。
 // ============================================================================
 
-// 阵列编号映射：FARM 的行顺序是远 → 近，所以 FARM[2]=9、FARM[4]=5、FARM[6]=1。
-const ONE = FARM[6]
-const FIVE = FARM[4]
-const NINE = FARM[2]
+const CAM_BOOKMARKS = [
+  { pos: new THREE.Vector3(60, 430, 990), target: new THREE.Vector3(0, 22, -340) },
+  { pos: new THREE.Vector3(FARM[6].x + 170, 150, FARM[6].z + 250), target: new THREE.Vector3(FARM[6].x, 74, FARM[6].z) },
+  { pos: new THREE.Vector3(-340, 250, 760), target: new THREE.Vector3(300, 20, 300) },
+] as const
 
-// 相机节点：大跨度是快速飞行，小跨度是俯冲缓冲、全景缓行和转头动作。
-const CAMERA_NODES = [
-  new THREE.Vector3(-100, 1720, -640), // 正上空起始点
-  new THREE.Vector3(-100, 720, -640), // 竖直俯冲
-  new THREE.Vector3(-100, 300, -640), // 俯冲最低点
-  new THREE.Vector3(-100, 300, -520), // 保持低位，先开始向后退
-  new THREE.Vector3(-100, 330, -200), // 微抬并继续倒退
-  new THREE.Vector3(-100, 390, 250), // 平顺抬头进入远景
-  new THREE.Vector3(60, 480, 990), // 全景构图
-  new THREE.Vector3(120, 470, 900), // 全景缓行，不停顿但放慢
-  new THREE.Vector3(NINE.x + 145, 210, NINE.z - 160), // 快速前推至 9 号
-  new THREE.Vector3(NINE.x + 160, 220, NINE.z - 110), // 9 号处转头
-  new THREE.Vector3(FIVE.x + 100, 130, FIVE.z + 105), // 沿 9→5→1 对角线飞行
-  new THREE.Vector3(ONE.x + 145, 86, ONE.z + 120), // 接近 1 号
-  new THREE.Vector3(ONE.x + 76, 56, ONE.z + 168), // 1 号前低机位终点
-]
+const ORBIT_DUR = 9
+const INTRO_TOTAL = INTRO_END + ORBIT_DUR
+const PATH_FRAC = INTRO_END / INTRO_TOTAL
+const ORBIT_A0 = Math.atan2(168, 76)
+const ORBIT_A1 = THREE.MathUtils.degToRad(268)
+const ORBIT_R0 = Math.hypot(76, 168)
+const ORBIT_R1 = 196
+const ORBIT_Y0 = 56
+const ORBIT_Y1 = 66
+const HUB = new THREE.Vector3(FARM[6].x, 0, FARM[6].z)
 
-// 正下方观察存在 lookAt 的极点奇异：相机一旦完全垂直向下，
-// 世界 up 轴没有唯一的屏幕朝向，下一帧就可能突然翻转 180°。
-// 这里让俯冲视线保留极小的前向量（约 7°，肉眼仍是正上空俯瞰），
-// 再用多个节点把视线连续抬起，彻底消除这个突变源。
-const DIVE_TARGET = new THREE.Vector3(-100, 0, -690)
-const LOOK_NODES = [
-  DIVE_TARGET.clone(), // 正上空向下看阵列中心
-  DIVE_TARGET.clone(), // 俯冲保持近似垂直视线
-  DIVE_TARGET.clone(),
-  new THREE.Vector3(-100, 15, -670), // 先只抬一点，衔接后退
-  new THREE.Vector3(-100, 70, -650), // 连续抬头
-  new THREE.Vector3(-100, 110, -640), // 进入远景视线
-  new THREE.Vector3(-100, 120, -640), // 全景看向场区
-  new THREE.Vector3(-100, 120, -640),
-  new THREE.Vector3(NINE.x, 96, NINE.z), // 锁定 9 号
-  new THREE.Vector3(FIVE.x, 96, FIVE.z), // 转头朝 9→5→1 对角线
-  new THREE.Vector3(ONE.x, 98, ONE.z), // 穿过 5 号飞向 1 号
-  new THREE.Vector3(ONE.x, 96, ONE.z),
-  new THREE.Vector3(ONE.x, 92, ONE.z), // 低机位轻微仰视
-]
-
-const CAMERA_PATH = new THREE.CatmullRomCurve3(CAMERA_NODES, false, 'centripetal', 0.38)
-const LOOK_PATH = new THREE.CatmullRomCurve3(LOOK_NODES, false, 'centripetal', 0.38)
-const START = 0
-const INTRO_END = 34
-
-// 整体只做一次缓入缓出；中途不重新 ease，避免镜头断裂。
 const ease = (t: number) => t * t * (3 - 2 * t)
 
-// 调试机位（截图/校色用，正常访问不受影响）：
-//   ?cam=方位角,俯仰角,距离[,目标x,目标y,目标z]
-// 方位角 0 = 从场区南侧(+z)向北看（默认主视角），180 = 从北侧反向看。
+const DEBUG_ALLOWED = (typeof import.meta !== 'undefined' && import.meta.env?.DEV === true)
+  || (typeof location !== 'undefined' && new URLSearchParams(location.search).has('debug'))
+
 const DEBUG_CAM = (() => {
-  if (typeof location === 'undefined') return null
+  if (!DEBUG_ALLOWED || typeof location === 'undefined') return null
   const q = new URLSearchParams(location.search).get('cam')
   if (!q) return null
   const v = q.split(',').map(Number)
@@ -84,14 +53,99 @@ const DEBUG_CAM = (() => {
   }
 })()
 
+const NO_INTRO = typeof location !== 'undefined'
+  && (new URLSearchParams(location.search).has('intro0') || (DEBUG_ALLOWED && new URLSearchParams(location.search).get('intro') === '0'))
+
+// QA / A/B 帧精确锚点：仅 DEBUG 允许 `?introT=<s>` 冻结开场时钟（软渲染可复现指定帧）。
+const INTRO_T_JUMP = (() => {
+  if (!DEBUG_ALLOWED || typeof location === 'undefined') return null
+  const q = new URLSearchParams(location.search).get('introT')
+  if (!q) return null
+  const v = Number(q)
+  return Number.isFinite(v) ? THREE.MathUtils.clamp(v, 0, INTRO_TOTAL) : null
+})()
+
+// —— “目标 + 指数平滑跟随”：不再每帧硬设 position/lookAt（掉帧/切换瞬间会“顿/跳”），
+//    而是每帧只追目标。τ=0.09s：60fps 跟得紧无拖影，掉帧时把单帧大位移摊到后续帧。
+//    核心价值：把“巡航→环绕”“环绕→coast”以及任何 / 斜率切换的残余视觉跳变彻底抹平。
+const CAM_SMOOTH_TAU = 0.09
+const _eUp = new THREE.Vector3(0, 1, 0)
+const _eLook = new THREE.Matrix4()
+const _eQuat = new THREE.Quaternion()
+// 复用目标/自由飞行临时对象，避免热身路径每帧 new Vector3 触发 GC
+const _tPos = new THREE.Vector3()
+const _tLook = new THREE.Vector3()
+const _dir = new THREE.Vector3()
+const _right = new THREE.Vector3()
+const _mv = new THREE.Vector3()
+
 export default function CameraRig() {
   const controlsRef = useRef<any>(null)
   const { camera } = useThree()
-  const finished = useRef(false)
+  const introStart = useRef<number | null>(null)
+  const bookmark = useRef<{ from: THREE.Vector3; fromT: THREE.Vector3; to: THREE.Vector3; toT: THREE.Vector3; t0: number } | null>(null)
 
-  useFrame((state) => {
-    // 调试机位：直接锁定相机，跳过开场
+  // 平滑跟随状态：首帧用目标自身初始化，避免起步跳变
+  const smPos = useRef(new THREE.Vector3())
+  const smLook = useRef(new THREE.Vector3())
+  const smFov = useRef(47)
+  const smInit = useRef(false)
+
+  // WASD 自由飞行输入
+  const keys = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const FLY = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'Space'])
+    const down = (e: KeyboardEvent) => {
+      if (e.repeat || !(FLY.has(e.code) || e.code === 'ShiftLeft' || e.code === 'ShiftRight')) return
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'BUTTON') return
+      keys.current.add(e.code)
+      if (FLY.has(e.code)) {
+        if (!useSim.getState().introDone && !DEBUG_CAM) useSim.getState().skipIntro()
+        if (e.code === 'Space' && useSim.getState().introDone) e.preventDefault()
+      }
+    }
+    const up = (e: KeyboardEvent) => { keys.current.delete(e.code) }
+    const blur = () => keys.current.clear()
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', blur)
+    }
+  }, [])
+
+  // 全局快捷键：Esc 跳过 / 1-3 书签
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const s = useSim.getState()
+      if (e.key === 'Escape' || e.key === ' ' || e.key.toLowerCase() === 'y') {
+        if (!s.introDone) s.skipIntro()
+      }
+      const n = Number(e.key)
+      if (n >= 1 && n <= CAM_BOOKMARKS.length) {
+        const b = CAM_BOOKMARKS[n - 1]
+        const p = camera.position.clone()
+        const ctl = controlsRef.current
+        bookmark.current = {
+          from: p, fromT: ctl ? ctl.target.clone() : new THREE.Vector3(0, 22, -340),
+          to: b.pos.clone(), toT: b.target.clone(), t0: performance.now(),
+        }
+        useSim.getState().skipIntro()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [camera])
+
+  useFrame((state, delta) => {
+    if (!controlsRef.current) controlsRef.current = (state.controls as any) || null
+    const ctl = controlsRef.current
+
     if (DEBUG_CAM) {
+      if (ctl) ctl.enabled = true
       const a = THREE.MathUtils.degToRad(DEBUG_CAM.az)
       const e = THREE.MathUtils.degToRad(DEBUG_CAM.el)
       const { dist, target } = DEBUG_CAM
@@ -101,43 +155,148 @@ export default function CameraRig() {
         target.z + dist * Math.cos(e) * Math.cos(a),
       )
       camera.lookAt(target)
-      const ctl0 = (state.controls as any) || controlsRef.current
-      if (ctl0) { ctl0.target.copy(target); ctl0.update() }
+      if (ctl) { ctl.target.copy(target); ctl.update() }
       const p0 = camera as THREE.PerspectiveCamera
       p0.fov = 47
       p0.updateProjectionMatrix()
+      if (!useSim.getState().introDone) useSim.getState().skipIntro()
       return
     }
 
-    if (finished.current) return
-
-    const t0 = state.clock.elapsedTime
-    if (t0 > INTRO_END) {
-      finished.current = true
+    // 书签机位平滑过渡
+    const bm = bookmark.current
+    if (bm) {
+      if (ctl) ctl.enabled = false
+      const k = Math.min(1, (performance.now() - bm.t0) / 1200)
+      const s = ease(k)
+      camera.position.lerpVectors(bm.from, bm.to, s)
+      const tg = bm.fromT.clone().lerp(bm.toT, s)
+      camera.lookAt(tg)
+      if (k >= 1) {
+        bookmark.current = null
+        if (ctl) {
+          ctl.enabled = true
+          ctl.target.copy(bm.toT)
+          ctl.update()
+        }
+      }
       return
     }
 
-    if (!controlsRef.current) {
-      controlsRef.current = (state.controls as any) || null
+    const s = useSim.getState()
+    if (NO_INTRO && !s.introDone) {
+      s.skipIntro()
+      if (ctl) {
+        ctl.enabled = true
+        ctl.target.copy(CAM.target)
+        ctl.update()
+      }
+      return
     }
 
-    const progress = ease(Math.min(1, Math.max(0, (t0 - START) / INTRO_END)))
-    const p = CAMERA_PATH.getPoint(progress)
-    const tg = LOOK_PATH.getPoint(progress)
-
-    camera.position.copy(p)
-    camera.lookAt(tg)
-    const ctl = controlsRef.current
-    if (ctl) {
-      ctl.target.copy(tg)
-      ctl.update()
+    if (s.introDone) {
+      // 开场中途跳过（Esc / 点击 / 键1-3 / WASD）时，introDone 立即为 true，
+      // 但 OrbitControls 在巡航期间一直 disabled，内部球坐标是陈旧值。
+      // 若不先把 controls.target/update() 同步到当前平滑注视点，用户第一次拖动
+      // 会先“回弹/跳一下”（round25 曾修、借来的分支已丢掉此逻辑）。
+      if (ctl && !ctl.enabled) {
+        ctl.target.copy(smLook.current)
+        ctl.update()
+      }
+      if (ctl) ctl.enabled = true
+      // WASD 自由飞行
+      const k = keys.current
+      const fwd = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0)
+      const strafe = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0)
+      const lift = (k.has('Space') ? 1 : 0) - (k.has('KeyC') ? 1 : 0)
+      if (fwd || strafe || lift) {
+        const v = (k.has('ShiftLeft') || k.has('ShiftRight') ? 620 : 240) * Math.min(0.05, delta)
+        camera.getWorldDirection(_dir)
+        _right.crossVectors(_dir, camera.up).normalize()
+        _mv.set(0, 0, 0)
+        _mv.addScaledVector(_dir, fwd * v)
+        _mv.addScaledVector(_right, strafe * v)
+        _mv.y += lift * v * 0.8
+        const ny = camera.position.y + _mv.y
+        if (ny < 14 || ny > 4600) _mv.y = 0
+        camera.position.add(_mv)
+        if (ctl) { ctl.target.add(_mv); ctl.update() }
+      }
+      return
     }
 
-    // 只保留真实无人机视线，不再人为侧倾，保证动作帅但不花哨。
-    camera.lookAt(tg)
+    // 巡航期间独占控制相机，禁用 OrbitControls 干扰与夹角约束
+    if (ctl) ctl.enabled = false
+
+    // 开场独立时钟：帧间增量累加（而非绝对 elapsedTime）。首帧/编译停顿若用
+    // 绝对时钟会一次跳数秒造成前几秒“黑屏/闪跳”；这里单帧钳 0.1s，停顿被涂抹，
+    // 正常帧率完全按真实时长推进。
+    if (introStart.current === null) {
+      introStart.current = 0
+    }
+    let el: number
+    if (INTRO_T_JUMP !== null) {
+      el = INTRO_T_JUMP
+    } else {
+      el = introStart.current
+      const dtSafe = delta > 0.5 ? 0.1 : Math.max(delta, 0.001)
+      introStart.current += dtSafe
+    }
+    // 单一全局时间基：整个运镜一阶连续，首尾自然缓入缓出，全程丝滑无顿挫
+    const u = ease(Math.min(1, el / INTRO_TOTAL))
+
+    // —— 计算本帧目标机位/朝向/侧倾/fov（先算，再平滑应用）——
+    // 复用 _tPos/_tLook（CAMERA_PATH.getPoint 会覆写目标向量，不新建对象）
+    let tPos = _tPos
+    let tLook = _tLook
+    let tFov: number
+    if (u >= PATH_FRAC) {
+      // —— 收尾环绕：从后侧经西侧绕到叶轮正面 ——
+      const e = (u - PATH_FRAC) / (1 - PATH_FRAC)
+      const ang = THREE.MathUtils.lerp(ORBIT_A0, ORBIT_A1, e)
+      const rad = THREE.MathUtils.lerp(ORBIT_R0, ORBIT_R1, e)
+      const hubY = THREE.MathUtils.lerp(92, 96, e)
+      tPos.set(HUB.x + Math.cos(ang) * rad, THREE.MathUtils.lerp(ORBIT_Y0, ORBIT_Y1, e), HUB.z + Math.sin(ang) * rad)
+      tLook.set(HUB.x, hubY, HUB.z)
+      tFov = 47
+    } else {
+      const progress = u / PATH_FRAC
+      CAMERA_PATH.getPoint(progress, tPos)
+      LOOK_PATH.getPoint(progress, tLook)
+      tFov = THREE.MathUtils.lerp(52, 47, progress)
+    }
+
+    // —— 平滑应用：位置/朝向/fov 指数跟随目标 ——
+    const alpha = 1 - Math.exp(-Math.min(Math.max(delta, 0.001), 0.25) / CAM_SMOOTH_TAU)
+    if (!smInit.current) {
+      smPos.current.copy(tPos)
+      smLook.current.copy(tLook)
+      smFov.current = tFov
+      smInit.current = true
+    } else {
+      smPos.current.lerp(tPos, alpha)
+      smLook.current.lerp(tLook, alpha)
+      smFov.current += (tFov - smFov.current) * alpha
+    }
+    camera.position.copy(smPos.current)
+    _eLook.lookAt(smPos.current, smLook.current, _eUp)
+    _eQuat.setFromRotationMatrix(_eLook)
+    camera.quaternion.slerp(_eQuat, alpha)
     const perspective = camera as THREE.PerspectiveCamera
-    perspective.fov = THREE.MathUtils.lerp(54, 47, progress)
+    perspective.fov = smFov.current
     perspective.updateProjectionMatrix()
+    const ctlS = controlsRef.current
+    if (ctlS) ctlS.target.copy(smLook.current)
+
+    if (el >= INTRO_TOTAL && !useSim.getState().introDone) {
+      useSim.getState().skipIntro()
+      if (ctl) {
+        ctl.enabled = true
+        ctl.target.copy(smLook.current)
+        // 让 OrbitControls 内部球坐标与当前相机/焦点一致后再启用，避免交接“回弹/跳变”
+        ctl.update()
+      }
+    }
   })
 
   return null

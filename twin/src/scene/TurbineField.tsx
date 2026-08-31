@@ -1,34 +1,48 @@
-import { useSim } from '../state/simStore'
-import { FARM, SERVOS, terrainHeight } from './terrainUtil'
+import { useEffect } from 'react'
+import { useFrame } from '@react-three/fiber'
+import { useSim, farmFrameNow } from '../state/simStore'
+import { FARM, SERVOS, terrainSurfaceY } from './terrainUtil'
 import HoloTurbine from './HoloTurbine'
-import GroundBladeShadow from './GroundBladeShadow'
+import { pushFarmFrame } from './frameBus'
 
 // ============================================================================
-// 真实 NREL 5MW 几何 × 全息材质
-// 所有机组统一为“透明线条化全息像”，不再提供会破坏沉浸感的模式切换。
-// 舵机仍与画面右侧 5 个控制条联动，真实影响对应机组偏航角。
+// 9 机阵列 + 闭环联动
+//  · 数据契约帧（farmFrame）每帧只求值一次，推给所有 HoloTurbine；
+//  · 点击拾取：onPointerDown 选中机组（矩阵 ↔ 场景 ↔ 信息卡三方联动）；
+//  · 偏航/转速/状态不再由 props 驱动 React —— 3D 直读同一帧（A5 修复）。
 // ============================================================================
 
 export default function TurbineField() {
-  const servos = useSim((s) => s.servos)
+  const setSelected = useSim((s) => s.setSelected)
+  const selected = useSim((s) => s.selected)
+
+  useEffect(() => {
+    pushFarmFrame(farmFrameNow())
+  }, [])
+
+  useFrame(() => {
+    pushFarmFrame(farmFrameNow())
+  })
 
   return (
     <group>
       {FARM.map((u, i) => {
         const servoIdx = SERVOS.indexOf(i)
-        const yawDeg = servoIdx >= 0 ? servos[servoIdx] : 0
         return (
-          <group key={u.id}>
-            <GroundBladeShadow x={u.x} z={u.z} y={terrainHeight(u.x, u.z)} />
-            <HoloTurbine
+          <group
             key={u.id}
-            x={u.x}
-            z={u.z}
-            y={terrainHeight(u.x, u.z)}
-            yawDeg={yawDeg}
-            speed={u.speed}
-            servo={servoIdx >= 0}
-          />
+            onPointerDown={(e) => {
+              e.stopPropagation()
+              setSelected(selected === i ? null : i)
+            }}
+          >
+            <HoloTurbine
+              idx={i}
+              x={u.x}
+              z={u.z}
+              y={terrainSurfaceY(u.x, u.z)}
+              servo={servoIdx >= 0 || selected === i}
+            />
           </group>
         )
       })}

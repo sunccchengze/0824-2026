@@ -43,6 +43,33 @@ const smoothstep = (e0: number, e1: number, x: number) => {
 }
 
 // ---- 地形：暗海式场区（近似海面微起伏）+ 西北群山剪影（地平线带）----
+/**
+ * 地面【实际渲染面】高度（第 20 轮修复）。
+ *
+ * 病因：WorldTerrain 画地面时对 terrainHeight 做了三重加工——
+ *   base = h*0.58 + round(h/26)*26*0.42        （台地量化）
+ *   + 逐面 hash 抬沉 (hash2-0.5)*6.4           （晶面碎化）
+ * 而风机/升压站/电缆/星光都直接用原始 terrainHeight 定位。
+ * 实测二者在 9 台机位处最大差 7.34 m（T06），升压站差 3.31 m。
+ * 风机基座能量环只离地 0.9~1.9 m，于是环被甩到空中 —— 用户看到的
+ * “乱飘的小圆环”。
+ *
+ * 修复：把这套加工抽成唯一函数，地面与所有贴地物体都调它。
+ * 注意不含波浪位移（那是顶点着色器里的时变项，逐帧起伏，
+ * 贴地物体跟随它反而会抖；波浪振幅在场区已按距离收敛）。
+ */
+export function terrainSurfaceY(x: number, z: number): number {
+  const h = terrainHeight(x, z)
+  const terrace = Math.round(h / 26) * 26
+  const CELL = 7600 / 128
+  const hs = (ix: number, iz: number) => {
+    const n = Math.sin(ix * 127.1 + iz * 311.7) * 43758.5453
+    return n - Math.floor(n)
+  }
+  const lift = (hs(Math.round(x / CELL), Math.round(z / CELL)) - 0.5) * 6.4
+  return h * 0.58 + terrace * 0.42 + lift
+}
+
 export function terrainHeight(x: number, z: number): number {
   // 三层尺度：远景山脊、场区缓坡、近景碎石起伏。远处不再是一块平板，
   // 但机组基础附近仍保留可施工的缓坡，保证风机、电缆和升压站自然贴地。
@@ -69,12 +96,22 @@ export function terrainHeight(x: number, z: number): number {
 }
 
 // ---- 场区：3×3 排布（舵机 1-5 与显眼机组编排见 SERVOS）----
+// 2026-08-28（任务#1 数据对齐）：阵列几何直接采用老网页/FLORIS 例题场
+// ——3×3、纵横间距 632 m = 5.02D（NREL 5MW D=126m）。这同时消解了
+// docs/07 B7 的"间距小于工程惯例"叙事风险：5D 恰是尾流控制惯例下限，
+// 且与本仓引用的 FLORIS 9 机基准功率 8095.15 kW 同一几何，代理引擎
+// 的尾流 k 即按该工况标定（turbinePhysics.JENSEN_K）。机组 ±20m 内
+// 微移位为取景用的确定性抖动（演示层，不影响功率物理口径）。
+export const ROW_GAP_M = 632 // 行距=FLORIS 例程阵列间距（5.02D）
+export const COL_GAP_M = 632 // 列距
+
+export const ROTOR_D_M = 126 // NREL 5MW 风轮直径（示意几何）
 export interface FarmUnit { id: string; x: number; z: number; row: number; col: number; speed: number }
 export const FARM: FarmUnit[] = (() => {
   const arr: FarmUnit[] = []
-  // 排距（z）：远 -1080 / 中 -640 / 近 -200；列距（x）：-450 / -40 / 370
-  const rowsZ = [-1080, -640, -200]
-  const colsX = [-450, -40, 370]
+  // 场心 (-100, -640)（保持旧取景重心）；FLORIS 间距 632m
+  const rowsZ = [-1272, -640, -8]
+  const colsX = [-732, -100, 532]
   let k = 0
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) {
@@ -82,7 +119,7 @@ export const FARM: FarmUnit[] = (() => {
       const jz = (((k * 37) % 5) - 2) * 8
       arr.push({
         id: `T0${k + 1}`,
-        x: colsX[c] + jx - 60,
+        x: colsX[c] + jx,
         z: rowsZ[r] + jz,
         row: r, col: c,
         speed: 1.02 + ((k * 29) % 5) * 0.1,
@@ -110,12 +147,20 @@ export const CAM = {
 }
 
 // ---- 世界标注锚点（引线标签用）----
+// A6 修复：锚点必须挂在"被指物体"的真实几何位置附近（塔基/机舱/站体顶/
+// 线路中点），而不是随意的高空悬点；Callouts 还会按屏幕投影做避让。
+const HUB = 90 // 轮毂高（米）
 export const ANCHOR = {
-  power: { x: -520, y: terrainHeight(-520, -1080) + 240, z: -1080 },
-  wake: { x: 480, y: terrainHeight(480, -640) + 210, z: -640 },
-  turbine: { x: -520, y: terrainHeight(-520, -200) + 120, z: -200 },
-  cable: { x: -280, y: terrainHeight(-280, 90) + 12, z: 90 },
-  substation: { x: SUBSTATION.x - 150, y: terrainHeight(SUBSTATION.x - 150, SUBSTATION.z - 120) + 130, z: SUBSTATION.z - 120 },
-  // 圈选：左下近景大机组（FARM[6] 附近）
-  dot: { x: -610, y: terrainHeight(-610, -160) + 60, z: -160 },
+  // 全场功率总览 → 指向中排中间机组机舱（功率汇聚的语义中心）
+  power: { x: FARM[4].x, y: terrainSurfaceY(FARM[4].x, FARM[4].z) + HUB + 8, z: FARM[4].z },
+  // 风能资源场 → 近排北侧的来流空域（机组北缘外 220m、轮毂高度）
+  wake: { x: FARM[7].x, y: terrainSurfaceY(FARM[7].x, FARM[7].z - 220) + HUB - 6, z: FARM[7].z - 220 },
+  // 风机 → 近排左侧机组（T07）塔筒中段
+  turbine: { x: FARM[6].x + 14, y: terrainSurfaceY(FARM[6].x, FARM[6].z) + 52, z: FARM[6].z },
+  // 集电线路 → 近排串接电缆中段（行 z 与升压站之间）
+  cable: { x: (FARM[8].x + SUBSTATION.x) / 2, y: terrainSurfaceY((FARM[8].x + SUBSTATION.x) / 2, (FARM[8].z + SUBSTATION.z) / 2) + 14, z: (FARM[8].z + SUBSTATION.z) / 2 },
+  // 升压站 → 站体顶缘
+  substation: { x: SUBSTATION.x - 40, y: terrainSurfaceY(SUBSTATION.x, SUBSTATION.z) + 46, z: SUBSTATION.z - 20 },
+  // 圈选：左下近景大机组（T07 塔基）
+  dot: { x: FARM[6].x, y: terrainSurfaceY(FARM[6].x, FARM[6].z) + 4, z: FARM[6].z },
 }
