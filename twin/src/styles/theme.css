@@ -145,7 +145,16 @@ button { font-family: inherit; }
 .kpi-row { display: flex; align-items: baseline; justify-content: center; gap: 8px; }
 .kpi-row .unit { font-size: 13px; color: var(--cyan-dim); letter-spacing: 0.2em; }
 
-.row2 { display: grid; grid-template-columns: 1.08fr 1fr; gap: 12px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.row2 .panel { padding: 8px 10px 10px; }
+.row2 .ptitle { flex-wrap: wrap; row-gap: 3px; column-gap: 6px; align-items: flex-start; }
+.row2 .ptitle .zh { font-size: 13px; letter-spacing: 0.08em; white-space: nowrap; line-height: 1.2; }
+.row2 .ptitle .en { flex-basis: 100%; margin-left: 0; font-size: 9.5px; letter-spacing: 0.06em; opacity: 0.85; line-height: 1.2; white-space: nowrap; }
+.row2 .ptitle .evb { margin-left: auto; order: 2; }
+.row2 .ptitle .zh { order: 1; }
+.row2 .ptitle .en { order: 3; }
+.row2 .kpi-md { font-size: 34px; }
+.row2 .kpi-sub { margin-top: 4px; }
 
 /* ===== 三环 ===== */
 .donuts { display: flex; justify-content: space-between; padding: 2px 6px 0; }
@@ -182,7 +191,7 @@ button { font-family: inherit; }
 .chart-glow { filter: drop-shadow(0 0 4px rgba(100, 215, 255, 0.9)); }
 
 /* ===== 风况雷达 ===== */
-.radar { display: flex; justify-content: center; padding: 2px 0; }
+/* radar layout defined in v3 block below */
 .petal { animation: petal 3.4s ease-in-out infinite; transform-origin: center; }
 .petal:nth-child(odd) { animation-delay: 1.2s; }
 @keyframes petal { 50% { opacity: 0.68; } }
@@ -332,8 +341,8 @@ button { font-family: inherit; }
 .palarms .pbody { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(120,210,250,.3) transparent; }
 .sweep { transform-origin: 118px 118px; animation: sweep-rot 7s linear infinite; }
 @keyframes sweep-rot { to { transform: rotate(360deg); } }
-.radar { display: flex; flex-direction: column; align-items: stretch; }
-.airflow-btn { display: block; width: max-content; margin: 7px auto 1px; font-size: 10.5px; letter-spacing: .08em; }
+/* radar defined below */
+.airflow-btn { display: block; width: max-content; margin: 2px auto 0; font-size: 10px; letter-spacing: .08em; padding: 3px 10px; }
 .airflow-btn.on { color: #d8f6ff; border-color: rgba(150,230,255,.5); background: rgba(60,160,220,.14); }
 
 .kpi-delta { display: flex; gap: 10px; align-items: baseline; justify-content: center; margin-top: 5px; font-family: var(--font-num); font-size: 11.5px; color: #a8cfe8; letter-spacing: 0.03em; }
@@ -359,8 +368,12 @@ button { font-family: inherit; }
 .matrix .m .mw { font-size: 10.5px; color: #bdeeff; font-family: var(--font-num); font-weight: 600; }
 .matrix .m .dot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; }
 .matrix .m:hover { border-color: rgba(160, 235, 255, 0.7); }
-.matrix .m.sel { border-color: #c9f2ff; box-shadow: 0 0 10px rgba(120, 225, 255, 0.4), inset 0 0 12px rgba(90, 210, 255, 0.18); }
+.matrix .m.sel { border-color: rgba(255, 210, 127, 0.92); background: linear-gradient(180deg, rgba(86, 54, 18, 0.9), rgba(42, 26, 8, 0.82)); box-shadow: 0 0 12px rgba(255, 190, 90, 0.5), inset 0 0 14px rgba(255, 210, 127, 0.22); }
+.matrix .m.sel .mid { color: #ffdf9e; }
+.matrix .m.sel .mw { color: #ffecc0; text-shadow: 0 0 8px rgba(255, 210, 127, 0.6); }
+.matrix .m.sel .dot { background: radial-gradient(circle at 35% 30%, #fff8e0, #ffd27f 45%, #e8941c 100%) !important; box-shadow: 0 0 9px rgba(255, 190, 90, 0.95) !important; animation: none !important; opacity: 1 !important; }
 .matrix .m.s-alarm { border-color: rgba(255, 95, 107, 0.65); }
+.matrix .m.s-alarm.sel { border-color: rgba(255, 210, 127, 0.92); }
 .matrix .m.s-alarm .dot.d-alarm { background: radial-gradient(circle at 35% 30%, #ffd9de, #ff5f6b 55%, #c11f35); box-shadow: 0 0 9px rgba(255, 95, 107, 0.9); animation: blinker 0.9s ease-in-out infinite; }
 .matrix .m.s-curtail { border-color: rgba(61, 90, 116, 0.8); }
 .matrix .m.s-curtail .dot, .matrix .m.s-idle .dot { background: radial-gradient(circle at 35% 30%, #d6e8f4, #3d5a74 60%, #24405a); box-shadow: 0 0 6px rgba(61, 90, 116, 0.6); animation: none; }
@@ -392,11 +405,11 @@ button { font-family: inherit; }
 .ait.lv-crit { background: linear-gradient(90deg, rgba(255, 95, 107, 0.07), transparent 60%); }
 
 /* 雷达读数 */
-.radar-readout { position: absolute; left: 0; right: 0; bottom: 4px; text-align: center; }
-.radar { position: relative; }
+.radar { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-bottom: 2px; }
+.radar-readout { position: relative; left: auto; right: auto; bottom: auto; text-align: center; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .radar-readout b { display: inline-block; font-family: var(--font-num); font-size: 17px; color: #d7f6ff; letter-spacing: 0.06em; text-shadow: 0 0 10px rgba(90, 200, 255, 0.5); margin-right: 8px; }
-.radar-readout span { font-size: 10px; color: #8fc6e4; letter-spacing: 0.1em; }
-.radar-readout em { display: block; font-style: normal; font-size: 8.5px; color: #5f8db0; letter-spacing: 0.14em; margin-top: 2px; }
+.radar-readout span { font-size: 10px; color: #8fc6e4; letter-spacing: 0.08em; line-height: 1.3; }
+.radar-readout em { display: block; font-style: normal; font-size: 8px; color: #5f8db0; letter-spacing: 0.08em; line-height: 1.35; white-space: normal; max-width: 92%; }
 .panel.pw { /* 保留：兼容旧引用 */ }
 
 /* 单机信息卡 */
