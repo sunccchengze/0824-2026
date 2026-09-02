@@ -66,9 +66,10 @@ const INTRO_T_JUMP = (() => {
 })()
 
 // —— “目标 + 指数平滑跟随”：不再每帧硬设 position/lookAt（掉帧/切换瞬间会“顿/跳”），
-//    而是每帧只追目标。τ=0.09s：60fps 跟得紧无拖影，掉帧时把单帧大位移摊到后续帧。
+//    而是每帧只追目标。τ=0.14s：加入轻微惯性，60fps 仍跟得紧，掉帧时大位移被摊平，
+//    镜头带有物理惯性而非硬切（用户需求：镜头移动惯性）。
 //    核心价值：把“巡航→环绕”“环绕→coast”以及任何 / 斜率切换的残余视觉跳变彻底抹平。
-const CAM_SMOOTH_TAU = 0.09
+const CAM_SMOOTH_TAU = 0.14
 const _eUp = new THREE.Vector3(0, 1, 0)
 const _eLook = new THREE.Matrix4()
 const _eQuat = new THREE.Quaternion()
@@ -78,6 +79,9 @@ const _tLook = new THREE.Vector3()
 const _dir = new THREE.Vector3()
 const _right = new THREE.Vector3()
 const _mv = new THREE.Vector3()
+const _flyTarget = new THREE.Vector3()
+const FLY_ACCEL_TAU = 0.18
+const FLY_DECAY_TAU = 0.55
 
 export default function CameraRig() {
   const controlsRef = useRef<any>(null)
@@ -90,6 +94,8 @@ export default function CameraRig() {
   const smLook = useRef(new THREE.Vector3())
   const smFov = useRef(47)
   const smInit = useRef(false)
+  // 自由飞行惯性：速度向量持续存在，松键后指数衰减
+  const flyVel = useRef(new THREE.Vector3())
 
   // WASD 自由飞行输入
   const keys = useRef<Set<string>>(new Set())
@@ -195,30 +201,42 @@ export default function CameraRig() {
     }
 
     if (s.introDone) {
-      // 开场中途跳过（Esc / 点击 / 键1-3 / WASD）时，introDone 立即为 true，
-      // 但 OrbitControls 在巡航期间一直 disabled，内部球坐标是陈旧值。
-      // 若不先把 controls.target/update() 同步到当前平滑注视点，用户第一次拖动
-      // 会先“回弹/跳一下”（round25 曾修、借来的分支已丢掉此逻辑）。
       if (ctl && !ctl.enabled) {
         ctl.target.copy(smLook.current)
         ctl.update()
       }
       if (ctl) ctl.enabled = true
-      // WASD 自由飞行
+      // WASD 自由飞行（带惯性）
       const k = keys.current
       const fwd = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0)
       const strafe = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0)
       const lift = (k.has('Space') ? 1 : 0) - (k.has('KeyC') ? 1 : 0)
-      if (fwd || strafe || lift) {
-        const v = (k.has('ShiftLeft') || k.has('ShiftRight') ? 620 : 240) * Math.min(0.05, delta)
+      const hasInput = fwd !== 0 || strafe !== 0 || lift !== 0
+      const dtClamped = Math.min(Math.max(delta, 0.001), 0.05)
+      if (hasInput) {
+        const speed = (k.has('ShiftLeft') || k.has('ShiftRight') ? 620 : 240)
         camera.getWorldDirection(_dir)
         _right.crossVectors(_dir, camera.up).normalize()
-        _mv.set(0, 0, 0)
-        _mv.addScaledVector(_dir, fwd * v)
-        _mv.addScaledVector(_right, strafe * v)
-        _mv.y += lift * v * 0.8
+        _flyTarget.set(0, 0, 0)
+        _flyTarget.addScaledVector(_dir, fwd * speed)
+        _flyTarget.addScaledVector(_right, strafe * speed)
+        _flyTarget.y += lift * speed * 0.8
+        // 加速：指数趋近目标速度
+        const a = 1 - Math.exp(-dtClamped / FLY_ACCEL_TAU)
+        flyVel.current.lerp(_flyTarget, a)
+      } else {
+        // 减速：指数衰减，产生滑行惯性
+        const d = Math.exp(-dtClamped / FLY_DECAY_TAU)
+        flyVel.current.multiplyScalar(d)
+        if (flyVel.current.lengthSq() < 0.01) flyVel.current.set(0, 0, 0)
+      }
+      if (flyVel.current.lengthSq() > 0) {
+        _mv.copy(flyVel.current).multiplyScalar(dtClamped)
         const ny = camera.position.y + _mv.y
-        if (ny < 14 || ny > 4600) _mv.y = 0
+        if (ny < 14 || ny > 4600) {
+          _mv.y = 0
+          flyVel.current.y = 0
+        }
         camera.position.add(_mv)
         if (ctl) { ctl.target.add(_mv); ctl.update() }
       }

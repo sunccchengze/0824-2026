@@ -145,7 +145,11 @@ export default function App() {
               minDistance={120}
               maxDistance={4600}
               enableDamping
-              dampingFactor={0.06}
+              dampingFactor={0.035}
+              enableZoom
+              zoomSpeed={0.7}
+              rotateSpeed={0.65}
+              panSpeed={0.7}
             />
             <Effects />
           </Canvas>
