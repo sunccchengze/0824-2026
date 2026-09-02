@@ -1,7 +1,7 @@
 // ============================================================================
 // 随机异常事件（演示口径）
 // ----------------------------------------------------------------------------
-// 需求：每 24 小时（模拟日）触发一次随机异常；等级/强度/发生时间/种类完全随机，
+// 需求：每 2~5 天（模拟日）触发一次随机异常；等级/强度/发生时间/种类完全随机，
 //       每次打开页面、每一天都不同。异常可由用户点击“修复异常情况”手动处理，
 //       否则 10s 后自动修复；修复后弹窗给出操作步骤。
 // 诚实边界：这是浏览器端确定性演示剧本（随页面加载随机生成），非真实 SCADA 事件。
@@ -53,9 +53,10 @@ export function generateAnomalyPlan(cycle: number, _currentH: number): AnomalyPl
   const meta = pick(KINDS, r)
   const severity: AnomalySeverity = r() < 0.3 ? 'crit' : 'warn'
   const intensity = 0.25 + r() * 0.7
-  // 触发时刻完全随机：从“当前模拟时刻”起未来 24h 内均匀取一点，
-  // 既满足每天一次、每次/每日不同，也保证首次加载就能在当日内等到。
-  const triggerH = (_currentH + r() * 24) % 24
+// 触发时刻：日内均匀随机 0..24h（与 _currentH 无关，支持 2~5 天一次的调度）
+// 每次打开页面、每一天都不同。
+  void _currentH
+  const triggerH = r() * 24
   const turbineIndex = meta.kind === 'grid' ? null : Math.floor(r() * FARM.length)
   const tid = turbineIndex === null ? null : FARM[turbineIndex].id
   const id = `anom-${cycle}-${hashStr(`${meta.kind}|${triggerH.toFixed(3)}|${intensity.toFixed(3)}|${tid ?? 'grid'}`)}`

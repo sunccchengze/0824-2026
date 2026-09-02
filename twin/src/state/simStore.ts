@@ -54,8 +54,9 @@ export interface SimState {
   introDone: boolean
   skipIntro: () => void
 
-  // 随机异常事件（每模拟日 1 次，完全随机；演示剧本）
+  // 随机异常事件（2~5 天一次，完全随机；演示剧本）
   anomalyCycle: number
+  anomalyNextCycle: number
   anomalyPlan: AnomalyPlan | null
   anomalyActive: AnomalyPlan | null
   anomalyFired: boolean
@@ -71,6 +72,8 @@ export interface SimState {
 }
 
 const ZERO_YAW = new Array<number>(N_UNITS).fill(0)
+const randomAnomalyGap = () => 2 + Math.floor(Math.random() * 4) // 2~5 天
+const initialGap = randomAnomalyGap()
 
 export const useSim = create<SimState>((set, get) => ({
   // 默认进入时刻改为 t=6（日出后高清高功率段）：与《日间氛围_参考基线》
@@ -135,35 +138,53 @@ export const useSim = create<SimState>((set, get) => ({
   introDone: false,
   skipIntro: () => set({ introDone: true }),
 
-  // —— 随机异常剧本 ——
+  // —— 随机异常剧本（2~5 天一次）——
   anomalyCycle: 0,
-  anomalyPlan: generateAnomalyPlan(0, 6),
+  anomalyNextCycle: initialGap,
+  anomalyPlan: null,
   anomalyActive: null,
   anomalyFired: false,
   anomalyModal: null,
   ensureAnomalyPlan: (cycle) =>
     set((s) => {
-      if (s.anomalyPlan && s.anomalyPlan.cycle === cycle) return {}
+      // 未到下次异常日：不生成剧本
+      if (cycle < s.anomalyNextCycle) {
+        if (s.anomalyPlan !== null || s.anomalyCycle !== cycle) {
+          return { anomalyCycle: cycle, anomalyPlan: null }
+        }
+        return {}
+      }
+      if (s.anomalyPlan && s.anomalyPlan.cycle === cycle) return { anomalyCycle: cycle }
       return { anomalyCycle: cycle, anomalyPlan: generateAnomalyPlan(cycle, s.tHours) }
     }),
   stepAnomaly: (prevH, nextH) =>
     set((s) => {
-      // 只有“跨午夜的大回退”（prev≈23.x → next≈0.x）才算新一天；
-      // 用户在时间轴上小幅/任意回拖不应被当成换日（否则会丢弃当天剧本）。
       const wrapped = nextH < prevH && prevH - nextH > 12
       if (wrapped) {
         const cycle = s.anomalyCycle + 1
+        // 仍未到下次异常日：清空剧本
+        if (cycle < s.anomalyNextCycle) {
+          return {
+            anomalyCycle: cycle,
+            anomalyPlan: null,
+            anomalyActive: null,
+            anomalyFired: false,
+            anomalyModal: s.anomalyModal,
+          }
+        }
+        // 到达或超过预定异常日：若无剧本则生成
+        const needPlan = !s.anomalyPlan || s.anomalyPlan.cycle !== cycle
         return {
           anomalyCycle: cycle,
-          anomalyPlan: generateAnomalyPlan(cycle, nextH),
+          anomalyPlan: needPlan ? generateAnomalyPlan(cycle, nextH) : s.anomalyPlan,
           anomalyActive: null,
           anomalyFired: false,
           anomalyModal: s.anomalyModal,
         }
       }
-      // 触发时间到点：激活一次（同日只触发一次，回拖不重新触发）
       const p = s.anomalyPlan
       if (!p || s.anomalyActive || s.anomalyFired) return {}
+      if (s.anomalyCycle < s.anomalyNextCycle) return {}
       const crossed = nextH > prevH && p.triggerH > prevH && p.triggerH <= nextH
       if (!crossed) return {}
       return { anomalyActive: p, anomalyFired: true }
@@ -172,7 +193,14 @@ export const useSim = create<SimState>((set, get) => ({
     set((s) => {
       const p = s.anomalyActive
       if (!p) return {}
-      return { anomalyActive: null, anomalyModal: { plan: p, auto } }
+      const gap = randomAnomalyGap()
+      return {
+        anomalyActive: null,
+        anomalyModal: { plan: p, auto },
+        anomalyNextCycle: s.anomalyCycle + gap,
+        anomalyPlan: null,
+        anomalyFired: false,
+      }
     }),
   closeAnomalyModal: () => set({ anomalyModal: null }),
 
