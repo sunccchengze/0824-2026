@@ -123,7 +123,7 @@ function GroundShadow({ x, z, y, idx }: { x: number; z: number; y: number; idx: 
   const softMatRef = useRef<THREE.MeshBasicMaterial>(null!)
   const discMatRef = useRef<THREE.MeshBasicMaterial>(null!)
   const discOuterMatRef = useRef<THREE.MeshBasicMaterial>(null!)
-  const spinRef = useRef<number>(Math.random() * Math.PI * 2)
+  const spinRef = useRef<number>(idx * 1.91)
   const bladeRefs = [useRef<THREE.Mesh>(null!), useRef<THREE.Mesh>(null!), useRef<THREE.Mesh>(null!)]
   const bladeMatRefs = [
     useRef<THREE.MeshBasicMaterial>(null!),
