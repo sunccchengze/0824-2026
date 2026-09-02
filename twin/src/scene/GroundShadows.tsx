@@ -137,7 +137,7 @@ function GroundShadow({ x, z, y, idx }: { x: number; z: number; y: number; idx: 
     sg.translate(0, 0.5, 0) // 根部在原点，延伸 +Y
     const soft = new THREE.PlaneGeometry(28, 1)
     soft.translate(0, 0.5, 0)
-    const bg = new THREE.PlaneGeometry(2.6, 1)
+    const bg = new THREE.PlaneGeometry(4.8, 1)
     bg.translate(0, 0.5, 0)
     const dg = new THREE.CircleGeometry(1, 48)
     return { streakGeo: sg, softGeo: soft, bladeGeo: bg, discGeo: dg, streakTex: streak, discTex: disc }
@@ -215,14 +215,13 @@ function GroundShadow({ x, z, y, idx }: { x: number; z: number; y: number; idx: 
   }, [streakTex])
 
   const bladeMats = useMemo(() => {
-    // 3 独立材质实例，透明度可分别控制，避免共享时互相覆盖
     return [0, 1, 2].map(
       () =>
         new THREE.MeshBasicMaterial({
           color: SHADOW_COLOR,
           map: streakTex ?? undefined,
           transparent: true,
-          opacity: 0.38,
+          opacity: 0.52,
           depthWrite: false,
           depthTest: false,
           fog: false,
@@ -283,7 +282,7 @@ function GroundShadow({ x, z, y, idx }: { x: number; z: number; y: number; idx: 
     const hubShadowX = -sx * tHub
     const hubShadowZ = -sz * tHub
     // 叶片阴影透明度：随太阳高度与 dayF，晨昏更浓
-    const bladeBaseOp = dayF * (0.38 + lowBoost * 0.45)
+    const bladeBaseOp = dayF * (0.52 + lowBoost * 0.5)
 
     for (let i = 0; i < 3; i++) {
       const bAngle = spinRef.current + (i * Math.PI * 2) / 3
