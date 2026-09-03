@@ -385,21 +385,22 @@ const _shadowRight = new THREE.Vector3()
 const _shadowBasis = new THREE.Matrix4()
 
 // ============================================================================
-// 叶片投影开关 —【待解决 / 移交项】
-// 背景：本机用 3 个不可见叶尖标记（getWorldPosition）+ projectToGroundY 得到真实
-//  叶尖的地面投影，理论上应与真实叶片严格同步。但实测：3 条影带（PlaneGeometry
-//  2.2m 宽 × 最长 100m）+ shadowTex 的宽度衰减叠加后，从低角/俯视会绕成一个
-//  「大软圆盘」而非 3 条清晰射线——疑似 orientShadow 的 makeBasis 旋转与纹理
-//  宽度羽化共同作用，导致影带展宽成面。塔基接地盘 + 塔影带形态正确，故本轮先
-//  停用叶片影（ENABLE_BLADE_SHADOW = false），保留前两者。
-//  后续接手者建议：
-//   a) 叶片影改用「细线/窄三角」而非带羽化纹理的宽平面，或直接复用真实叶片
-//      截面（bladeRibSet）投影；
-//   b) 复核 orientShadow 的 basis：_shadowRight = cross(up, dir) 可能使宽轴≠法向，
-//      导致贴地平面被旋转成斜交、放大成面；可改用 setFromUnitVectors 或欧拉铺平；
-//   c) 影带长度不再按 0.7 系数截断（应按 t=(P.y-g)/sun.y 完整投影），避免近视模糊。
+// 叶片投影（第 33 轮修复：从「大软圆盘」→ 3 条清晰射线）
+// 根因（第 31 轮移交项复核）：
+//  1. 纹理宽度羽化是主因：shadowTex 在 2.2m 宽度上全程 pow(1-|u|/wf, 2.2)，
+//     无硬核 → 每条影带都是一整条软梯度，3 条随转子旋转叠加成软圆盘；
+//  2. orientShadow 的 makeBasis 为左手系（cross(up,dir) 得 right，right×dir=-up），
+//     平面对称故视觉无差，但属方向性错误，一并纠正为右手系。
+// 修复：
+//  a) 叶片影改「根部宽→尖端窄」的梯形面（真实叶片弦向渐缩），配独立
+//     硬核纹理 bladeShadowTex（中心 55% 全 alpha，仅边缘窄羽化）→ 轮廓清晰；
+//  b) orientShadow 改 cross(dir, up) → 右手系，长轴严格沿投影方向、宽轴水平；
+//  c) 影带长度按 t=(P.y-g)/sun.y 完整投影（不再 0.7 截断），上限 440m；
+//  d) 【关键】塔影带也改完整物理投影（塔底 → 轮毂投影点，上限 640m），
+//     使塔影带远端与叶片影锚点（轮毂投影）严丝合缝——旧版塔影 175m 截断、
+//     叶片影锚在 400m+ 外，日出低角时叶片影成为离机 400m 的「孤儿暗斑」。
 // ============================================================================
-const ENABLE_BLADE_SHADOW = false
+const ENABLE_BLADE_SHADOW = true
 
 /** 把世界坐标 P 沿 -sun 投影到 y=g 平面（物理正确，sun.y>0）。 */
 function projectToGroundY(P: THREE.Vector3, sun: THREE.Vector3, g: number, out: THREE.Vector3): THREE.Vector3 {
@@ -411,7 +412,7 @@ function projectToGroundY(P: THREE.Vector3, sun: THREE.Vector3, g: number, out: 
 function orientShadow(mesh: THREE.Mesh, dirX: number, dirZ: number): void {
   const len = Math.hypot(dirX, dirZ)
   if (len < 1e-4) { _shadowDir.set(0, 0, 1); _shadowRight.set(1, 0, 0) }
-  else { _shadowDir.set(dirX / len, 0, dirZ / len); _shadowRight.crossVectors(_shadowUp, _shadowDir) }
+  else { _shadowDir.set(dirX / len, 0, dirZ / len); _shadowRight.crossVectors(_shadowDir, _shadowUp) }
   _shadowBasis.makeBasis(_shadowRight, _shadowDir, _shadowUp)
   mesh.quaternion.setFromRotationMatrix(_shadowBasis)
 }
@@ -497,7 +498,18 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
   const shadowGeo = useMemo(() => {
     const disc = new THREE.CircleGeometry(1, 48)
     const tower = new THREE.PlaneGeometry(14, 1); tower.translate(0, 0.5, 0)
-    const blade = new THREE.PlaneGeometry(2.2, 1); blade.translate(0, 0.5, 0)
+    // 叶片影：梯形面（根部宽→尖端窄），局部 y=0 根 / y=1 尖，x=±半宽。
+    // 不再用等宽平面 + 全程羽化纹理（旧版糊成「大软圆盘」的根因）。
+    // 半宽取略大于真实弦向（根 2.6m/尖 1.0m）：本场景为全息示意、塔影带宽 14m，
+    // 影带需在远景仍可读，但明显细于塔影，避免再糊成盘。
+    const blade = new THREE.BufferGeometry()
+    const ROOT_HW = 2.6 // 根部半宽
+    const TIP_HW = 1.0 // 尖端半宽
+    blade.setAttribute('position', new THREE.Float32BufferAttribute([
+      -ROOT_HW, 0, 0, ROOT_HW, 0, 0, -TIP_HW, 1, 0, TIP_HW, 1, 0,
+    ], 3))
+    blade.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2))
+    blade.setIndex([0, 1, 2, 1, 3, 2])
     return { disc, tower, blade }
   }, [])
 
@@ -529,6 +541,33 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
     return tex
   }, [])
 
+  // 叶片影纹理：硬核横截面（中心 55% 全 alpha，仅边缘窄羽化）+ 沿长轴衰减。
+  // 与塔影 shadowTex（全程宽度羽化）分离，避免叶片影糊成软盘。
+  const bladeShadowTex = useMemo(() => {
+    if (typeof document === 'undefined') return null
+    const W = 64, H = 256
+    const c = document.createElement('canvas'); c.width = W; c.height = H
+    const ctx = c.getContext('2d')!
+    const img = ctx.createImageData(W, H)
+    for (let y = 0; y < H; y++) {
+      const v = y / (H - 1) // 0 根 → 1 尖
+      const lenA = Math.pow(1 - v, 1.6) // 沿长轴衰减：根亮尖灭
+      for (let x = 0; x < W; x++) {
+        const cu = Math.abs((x / (W - 1)) * 2 - 1) // 0 中心 → 1 边缘
+        const crossA = cu <= 0.55 ? 1 : Math.pow(1 - (cu - 0.55) / 0.45, 1.5)
+        const i = (y * W + x) * 4
+        img.data[i] = 255; img.data[i + 1] = 255; img.data[i + 2] = 255
+        img.data[i + 3] = Math.round(Math.max(0, Math.min(1, lenA * crossA)) * 255)
+      }
+    }
+    ctx.putImageData(img, 0, 0)
+    const tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.NoColorSpace
+    tex.wrapS = THREE.ClampToEdgeWrapping; tex.wrapT = THREE.ClampToEdgeWrapping
+    tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter
+    return tex
+  }, [])
+
   const shadowDiscTex = useMemo(() => {
     if (typeof document === 'undefined') return null
     const c = document.createElement('canvas'); c.width = 128; c.height = 128
@@ -548,6 +587,7 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
   // 影子世界坐标 → 投影到地面 → 转风机局部，驱动 mesh（与前面 world 投影共用临时对象）
   const _sProj = useMemo(() => new THREE.Vector3(), [])
   const _sDir = useMemo(() => new THREE.Vector3(), [])
+  const _tipWorld = useMemo(() => new THREE.Vector3(), [])
 
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime
@@ -617,10 +657,12 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
         shadowDiscMat.current.opacity = dayF * 0.6
         shadowDisc.current.scale.set(14, 14, 1)
       }
-      // 塔影带：塔顶(轮毂)世界投影 → 沿 -sun 方向
+      // 塔影带：塔顶(轮毂)世界投影 → 沿 -sun 方向。
+      // 长度 = 完整物理投影（塔底 → 轮毂投影点，上限 640m），
+      // 远端与叶片影锚点（同一轮毂投影点）无缝衔接，不再 0.7 截断。
       const tH = (hub.y - groundY) / sun.y
       const towerDx = -tH * sun.x, towerDz = -tH * sun.z
-      const towerLen = Math.min(Math.hypot(towerDx, towerDz) * 0.7, 175)
+      const towerLen = Math.min(Math.hypot(towerDx, towerDz), 640)
       if (shadowTower.current && shadowTowerMat.current) {
         shadowTower.current.visible = true
         shadowTower.current.position.set(0, 0.7, 0)
@@ -629,26 +671,26 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
         const sinEl = Math.max(0, Math.min(1, sun.y))
         shadowTowerMat.current.opacity = dayF * (0.62 + (1 - sinEl) * 0.4) * 0.38
       }
-      // 叶片投影（待解决/移交：见上方 ENABLE_BLADE_SHADOW 说明，默认关闭）
+      // 叶片投影：3 条射线从轮毂投影指向各叶尖投影（完整投影，上限 440m 与塔影衔接）
       if (ENABLE_BLADE_SHADOW) {
         projectToGroundY(hub, sun, groundY, _sProj)
         for (let i = 0; i < 3; i++) {
-          const tipW = tipMarkers[i].current.getWorldPosition(new THREE.Vector3())
-          projectToGroundY(tipW, sun, groundY, _sDir)
+          tipMarkers[i].current.getWorldPosition(_tipWorld)
+          projectToGroundY(_tipWorld, sun, groundY, _sDir)
           const dx = _sDir.x - _sProj.x, dz = _sDir.z - _sProj.z
           const blen = Math.hypot(dx, dz)
           const mesh = shadowBlades[i].current
           if (mesh) {
-            if (blen < 2) { mesh.visible = false; continue }
+            if (blen < 3) { mesh.visible = false; continue }
             mesh.visible = true
-            mesh.position.set(_sProj.x - x, 0.6 + i * 0.01, _sProj.z - z)
+            mesh.position.set(_sProj.x - x, 0.6 + i * 0.02, _sProj.z - z)
             orientShadow(mesh, dx, dz)
-            mesh.scale.set(1, Math.min(blen, 100), 1)
+            mesh.scale.set(1, Math.min(blen, 440), 1)
           }
           const mat = shadowBladeMats[i].current
           if (mat) {
             const sinEl = Math.max(0, Math.min(1, sun.y))
-            mat.opacity = dayF * (0.62 + (1 - sinEl) * 0.4) * 0.55
+            mat.opacity = dayF * (0.62 + (1 - sinEl) * 0.4) * 0.42
           }
         }
       } else {
@@ -722,7 +764,7 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
           frustumCulled={false}
           visible={false}
         >
-          <meshBasicMaterial ref={shadowBladeMats[i]} color="#08101e" map={shadowTex ?? undefined} transparent depthWrite={false} depthTest={false} fog={false} toneMapped={false} side={THREE.DoubleSide} />
+          <meshBasicMaterial ref={shadowBladeMats[i]} color="#08101e" map={bladeShadowTex ?? undefined} transparent depthWrite={false} depthTest={false} fog={false} toneMapped={false} side={THREE.DoubleSide} />
         </mesh>
       ))}
 
