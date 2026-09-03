@@ -226,14 +226,23 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
     const sy = terrainSurfaceY(u.x, u.z)
     if (sy > 12) seaOK = false // 风机区是海床，应接近海平面
   }
-  // 海岸在离场心 1825m 处抬升到 ≥12m，内陆更高
-  for (const ang of [0, 90, 180, 270]) {
-    const dx = Math.sin((ang * Math.PI) / 180), dz = Math.cos((ang * Math.PI) / 180)
+  // 第 31 轮「开放外海」：北(-z)/西(-x) 两相邻侧为陆地，南(+z)/东(+x) 两相邻侧开放为海。
+  // 陆地侧在离场心约 2300m 处应已明显高于海面（≥30m）。
+  for (const dir of [[0, -1] as const, [-1, 0] as const]) {
+    const [dx, dz] = dir
     const h = terrainHeight(FARM_CENTER.x + dx * 2300, FARM_CENTER.z + dz * 2300)
     if (h < 30) coastOK = false
   }
+  // 开放侧：南(+z)/东(+x) 在离场心 2300m 处应仍为海床（≤12m，无陆地抬升）
+  let openOK = true
+  for (const dir of [[0, 1] as const, [1, 0] as const]) {
+    const [dx, dz] = dir
+    const h = terrainHeight(FARM_CENTER.x + dx * 2300, FARM_CENTER.z + dz * 2300)
+    if (h > 12) openOK = false
+  }
   ok('V&V 风机区为海床：机位 terrainSurfaceY ≤ 12m（贴海）', seaOK, '机位贴海基准')
   ok('V&V 海岸明显高于海面：内陆 2300m 处 ≥30m', coastOK, '海陆交界抬升')
+  ok('V&V 开放外海：南/东相邻侧 2300m 处保持海床 ≤12m', openOK, '两相邻侧开放为海')
 
   // 第 26/29 轮：波浪位移是「运行时顶点着色器」副作用，静态几何应仍严格等于
   // terrainSurfaceY（波幅只在 shader 里对水面顶点叠加，不影响贴地基准）。

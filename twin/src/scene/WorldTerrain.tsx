@@ -2,7 +2,7 @@
 import { useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { terrainSurfaceY, FARM_CENTER } from './terrainUtil'
+import { terrainSurfaceY, landMask, FARM_CENTER } from './terrainUtil'
 import { skyState } from './lightState'
 import { windAt } from '../data/farmSim'
 import { useSim } from '../state/simStore'
@@ -26,6 +26,8 @@ const VERT = /* glsl */ `
 varying float vWater;
 varying vec3 vWPos;
 varying vec3 vWN;
+varying float vLand;
+attribute float aLand;
 uniform float uTime;
 uniform vec2 uWind;
 uniform vec2 uCenter;
@@ -57,9 +59,11 @@ void main() {
 
   // 基底高度（海底）：position.y 来自 terrainSurfaceY（世界真值）
   float baseY = position.y;
-  // 水陆 mask：基底低→水(1)，高→陆地(0)。陆地在 d>1750m 陡升
-  float water = smoothstep(30.0, 12.0, baseY);
+  // 水陆 mask：aLand≈0 → 开放海(1)；aLand>0 → 陆地(0)。
+  // 用 land 权重作主判据，避免「海岸低海拔沙带被误判为水」。
+  float water = 1.0 - smoothstep(0.0, 0.02, aLand);
   vWater = water;
+  vLand = aLand;
 
   // 近场收敛：离场心越近波浪越收敛（塔基贴地、风场稳定）
   float d = length(wp.xz - uCenter);
@@ -96,6 +100,7 @@ precision highp float;
 varying float vWater;
 varying vec3 vWPos;
 varying vec3 vWN;
+varying float vLand;
 uniform float uTime;
 uniform float uDayF;
 uniform float uGlow;
@@ -193,12 +198,32 @@ void main() {
   waterCol += vec3(0.05, 0.13, 0.20) * moonSpec * night * uGlow * 0.30;
   waterCol += vec3(0.02, 0.06, 0.11) * crest * night * uGlow * 0.40;
 
-  // —— 陆地（远山剪影）：深灰青 + 微弱斑驳，与海上区分 ——
-  vec3 landCol = vec3(0.010, 0.026, 0.046) + vec3(0.010, 0.028, 0.052) * uDayF * 0.9;
+  // —— 陆地（分带生物群系：近岸黄沙 → 内陆森林 → 远山），与海面形成强对比 ——
+  // 用 vLand（0..1，向陆地线性增大）作为「离海岸远近」的代理：
+  //   vLand ∈ (0, 0.16)：沙带；vLand ∈ (0.14, 0.62)：森林；vLand > 0.55：远山。
+  float sandMask  = 1.0 - smoothstep(0.06, 0.17, vLand);            // 近岸沙带(只在低land)
+  float forestMask = smoothstep(0.12, 0.26, vLand) * (1.0 - smoothstep(0.60, 0.80, vLand));
+  float mtnMask   = smoothstep(0.55, 0.85, vLand);                 // 内陆远山
+
+  // 沙：低饱和暖黄（克制、不刺眼的黄褐），白天亮、夜里压暗
+  vec3 sandCol = mix(vec3(0.075, 0.058, 0.036), vec3(0.40, 0.34, 0.20), uDayF);
+  // 森林：低饱和冷绿（莫兰迪），白天呈现灰绿林地
+  vec3 forestCol = mix(vec3(0.035, 0.055, 0.044), vec3(0.12, 0.24, 0.15), uDayF);
+  // 远山：深灰青（大气剪影感，接原有冷调）
+  vec3 mtnCol = vec3(0.014, 0.030, 0.050) + vec3(0.012, 0.032, 0.055) * uDayF * 0.9;
+
   float lm = vnoise(vWPos.xz * 0.0021);
   lm += 0.5 * vnoise(vWPos.xz * 0.0055);
-  landCol += (lm - 0.5) * 0.05;
-  landCol += vec3(0.014, 0.046, 0.068) * uDayF * 0.50;
+  // 森林纹理：细碎树冠斑驳（高频）、低饱和
+  float forestN = vnoise(vWPos.xz * 0.012);
+  forestN += 0.5 * vnoise(vWPos.xz * 0.030);
+
+  vec3 landCol = mtnCol;
+  // 森林在台地，沙在近岸，两者在各自带内叠加
+  landCol = mix(landCol, forestCol * (0.82 + 0.28 * forestN), forestMask * 0.9);
+  landCol = mix(landCol, sandCol * (0.9 + 0.2 * vnoise(vWPos.xz * 0.02)), sandMask * 0.9);
+  landCol += (lm - 0.5) * 0.04;                    // 微弱整体斑驳
+  landCol += vec3(0.012, 0.040, 0.060) * uDayF * 0.45; // 白天冷调补光
 
   vec3 col = mix(landCol, waterCol, vWater);
 
@@ -219,12 +244,15 @@ export default function WorldTerrain() {
     const g = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG)
     g.rotateX(-Math.PI / 2)
     const pos = g.attributes.position as THREE.BufferAttribute
+    const land = new Float32Array(pos.count)
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i)
       const z = pos.getZ(i)
       const y = terrainSurfaceY(x, z)
       pos.setY(i, y)
+      land[i] = landMask(x, z)
     }
+    g.setAttribute('aLand', new THREE.BufferAttribute(land, 1))
     g.computeVertexNormals()
 
     const u = {

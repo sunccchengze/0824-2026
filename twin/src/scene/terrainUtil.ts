@@ -42,16 +42,39 @@ const smoothstep = (e0: number, e1: number, x: number) => {
   return t * t * (3 - 2 * t)
 }
 
-// ---- 地形：海上风电场（大盆地海床 + 四周明显抬升的海岸山脉）----
-// 第 29/30 轮重构（用户验收回访）：
-//  · 海盆半径大幅扩大，全部 9 机与升压站均位于海中央，距海岸遥远；
-//  · 海岸带陡升（陆地明显高于海平面），不再是 50-80m 的糊过渡；
+// ---- 地形：开放外海 + 两相邻侧陆地（第 31 轮重构：用户验收回访）----
+// 第 29/30 轮的「以场心为圆心的径向海盆」被用户判为「盆地/湖泊，不是海」：
+//  四周全是等高海岸山脉，把海围成一口碗。本轮把世界改成「开放外海」——
+//  · 南(+z)、东(+x) 两【相邻侧】完全开放为纯海，海面一路延伸至世界边缘（无岸）；
+//  · 北(-z)、西(-x) 两【相邻侧】为陆地，海岸线带噪声蜿蜒（曲折包裹）；
+//  · 全部 9 机与升压站仍位于海中央、距海岸遥远（贴海平台）；
 //  · 海床只保留极低幅微地貌（±2m），贴地稳定、贴近真实海平台。
-/** 海上风电场中心（海盆圆心；与场景布局场心一致） */
+/** 海上风电场中心（保持旧取景重心；本版地形不再以之为圆心） */
 export const FARM_CENTER = { x: -100, z: -640 } as const
 
+/** 北向(-z)海岸线基准（-z 大于此值才进入陆地；越往北越高） */
+const COAST_N = 1720
+/** 西向(-x)海岸线基准（-x 大于此值才进入陆地；越往西越高） */
+const COAST_W = 1420
+/** 海岸线蜿蜒噪声幅度（让岸边曲折，而非直线） */
+const COAST_WOBBLE = 320
+
 /**
- * 地面【实际渲染面】高度（第 30 轮重构）。
+ * 陆地权重 0..1：0=开放海床，1=陆地。北/西两个方向各自产生一片陆地，
+ * 用平滑 max 组合 —— 任一方向靠陆即抬升。南/东即保持 0（开放海）。
+ * 噪声使海岸线蜿蜒曲折，破除「直线切割」的切割带感。
+ */
+export function landMask(x: number, z: number): number {
+  const wobN = (N.fbm(x * 0.00058 + 5.7, 40.0, 3) - 0.5) * 2 * COAST_WOBBLE
+  const wobW = (N.fbm(90.0, z * 0.00058 - 3.2, 3) - 0.5) * 2 * COAST_WOBBLE
+  // -z / -x 越大越靠陆；用较陡的 smoothstep 形成清晰海岸线
+  const wN = smoothstep(COAST_N, COAST_N + 480, -z + wobN)
+  const wW = smoothstep(COAST_W, COAST_W + 460, -x + wobW)
+  return Math.max(wN, wW)
+}
+
+/**
+ * 地面【实际渲染面】高度（第 30 轮起连续面）。
  * 直接等于连续地形 terrainHeight（连续海床，无台地量化台阶）。
  * 贴地基准与渲染面同源 —— 风机/升压站/电缆/星光全部贴它定位，零回归。
  */
@@ -60,18 +83,20 @@ export function terrainSurfaceY(x: number, z: number): number {
 }
 
 export function terrainHeight(x: number, z: number): number {
-  // 到场心（海盆圆心）距离
-  const d = Math.hypot(x - FARM_CENTER.x, z - FARM_CENTER.z)
+  const land = landMask(x, z)
   // 海床基准（低，贴近真实海平台）+ 极低幅微地貌（不是完全平面）
   const bed = (N.fbm(x * 0.0009, z * 0.0009, 3) - 0.5) * 4.0
   let h = 2.0 + bed
-  // 海岸陡坡：d 从海缘(1750m)快速抬升到岸顶(~80m)，陆地明显高过海面
-  const coast = smoothstep(1750, 2060, d)
-  h += coast * 82
-  // 内陆远山（地平线剪影带）：更远处更高，带噪声起伏
-  const mtn = smoothstep(2150, 3200, d)
-  h += mtn * (95 + 175 * N.ridged(x * 0.00042 + 3.1, z * 0.00042 - 1.4, 4))
-  // 升压站局地再压平
+  if (land > 0) {
+    // 分带：近岸沙带(矮、平缓) → 森林台地(中) → 内陆远山(高、噪声起伏)
+    const sand = smoothstep(0.0, 0.28, land)      // 近海黄沙带
+    const forest = smoothstep(0.20, 0.72, land)   // 森林台地
+    const mountain = smoothstep(0.55, 1.0, land)  // 内陆远山
+    h += sand * 10
+    h += forest * (34 + 20 * N.ridged(x * 0.0005 + 1.7, z * 0.0005 - 9.3, 3))
+    h += mountain * (60 + 190 * N.ridged(x * 0.00032 + 3.1, z * 0.00032 - 1.4, 4))
+  }
+  // 升压站局地再压平（站体仍在海中央）
   const dS = Math.hypot(x - SUBSTATION.x, z - SUBSTATION.z)
   h *= 1 - 0.9 * smoothstep(300, 130, dS)
   return h

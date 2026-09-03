@@ -6,6 +6,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import {
   getTurbineGeos, TURBINE_SPEC as S, PERIM, STATIONS, TOWER_PROFILE, towerRadiusAtY,
 } from './turbine/geometry'
+import { pushRotorTips } from './rotorShadowBus'
 
 // ============================================================================
 // AEOLUS — 全息纯白线稿风机（v3：合批 + 物理朝向 + 状态语义）
@@ -386,6 +387,8 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
   const selected = useSim((st) => st.selected === idx)
   const root = useRef<THREE.Group>(null!)
   const spin = useRef<THREE.Group>(null!)
+  const hubMarker = useRef<THREE.Object3D>(null!)
+  const tipMarkers = [useRef<THREE.Object3D>(null!), useRef<THREE.Object3D>(null!), useRef<THREE.Object3D>(null!)]
   const beaconMat = useRef<THREE.MeshBasicMaterial>(null!)
   const beaconLight = useRef<THREE.PointLight>(null!)
   const beaconHalo = useRef<THREE.Sprite>(null!)
@@ -427,6 +430,23 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
       beaconHaloMat: haloMat,
       beaconOuterMat: outerMat,
     }
+  }, [])
+
+  // 叶片尖端在【spin 组局部】坐标（与 rotor 装配矩阵完全一致，供投影复用）。
+  // 叶尖在 blade 几何：y = bladeLen + 0.5（见 buildBladeGeometry tipC）；经
+  //   M_i = T(0,0,5.35) · Rx(cone) · Rz(i·120°) 装配到转子组。
+  // 把 M_i 作用到 (0, tipY, 0) 即为 spin 局部叶尖位置（spin 组再绕 z 自转，
+  // 3 个标记随组一起转，getWorldPosition 即真实世界叶尖）。
+  const tipLocalOffsets = useMemo(() => {
+    const tipY = S.bladeLen + 0.5
+    const cone = THREE.MathUtils.degToRad(S.coneDeg)
+    return [0, 1, 2].map((i) => {
+      const m = new THREE.Matrix4()
+        .makeTranslation(0, 0, 5.35)
+        .multiply(new THREE.Matrix4().makeRotationX(cone))
+        .multiply(new THREE.Matrix4().makeRotationZ((i * Math.PI * 2) / 3))
+      return new THREE.Vector3(0, tipY, 0).applyMatrix4(m)
+    })
   }, [])
 
   useFrame((state, dt) => {
@@ -483,6 +503,18 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
     // 转子：rad/s = rpm × 2π/60（B8：转速是风的函数）
     spinRef.current -= dt * ((u.rpm * Math.PI) / 30)
     if (spin.current) spin.current.rotation.z = spinRef.current
+
+    // 把 3 个叶尖 + 轮毂的真实世界坐标写入总线（供 GroundShadows 投影）。
+    // localToWorld 用场景图真实矩阵（含 spin/tilt/yaw），投影与真实叶片严格同步。
+    if (spin.current && hubMarker.current && tipMarkers[0].current) {
+      const hub = hubMarker.current.getWorldPosition(new THREE.Vector3())
+      const tips = [
+        tipMarkers[0].current.getWorldPosition(new THREE.Vector3()),
+        tipMarkers[1].current.getWorldPosition(new THREE.Vector3()),
+        tipMarkers[2].current.getWorldPosition(new THREE.Vector3()),
+      ] as [THREE.Vector3, THREE.Vector3, THREE.Vector3]
+      pushRotorTips(idx, { hub, tips, bladeLen: S.bladeLen, hubY: S.hubY })
+    }
     // 偏航：机头基向朝北（迎风，A4 修正）；正偏航 = 方位向东
     if (root.current) {
       const target = Math.PI - D2R(u.yawDeg)
@@ -568,6 +600,11 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
             <lineSegments geometry={assets.merged.rotorRibs} material={assets.rib} renderOrder={2} />
             <lineSegments geometry={assets.merged.rotorHalo} material={assets.halo} renderOrder={3} />
             <lineSegments geometry={assets.merged.rotorCore} material={assets.core} renderOrder={4} />
+            {/* 不可见叶尖/轮毂标记：供 GroundShadows 读取真实世界坐标（投影同步） */}
+            <object3D ref={hubMarker} />
+            {tipLocalOffsets.map((p, i) => (
+              <object3D key={`tip-${i}`} ref={tipMarkers[i]} position={[p.x, p.y, p.z]} />
+            ))}
           </group>
         </group>
       </group>

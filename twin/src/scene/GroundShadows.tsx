@@ -4,37 +4,27 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { FARM, terrainSurfaceY } from './terrainUtil'
 import { skyState } from './lightState'
-import { getFarmFrame } from './frameBus'
-import { TURBINE_SPEC } from './turbine/geometry'
-
-const HUB_Y = TURBINE_SPEC.hubY
-const BLADE_LEN = TURBINE_SPEC.bladeLen
-const TILT_DEG = TURBINE_SPEC.tiltDeg
-const D2R = THREE.MathUtils.degToRad
-const TILT_RAD = D2R(TILT_DEG)
-const COS_TILT = Math.cos(TILT_RAD)
-const SIN_TILT = Math.sin(TILT_RAD)
+import { getRotorTips } from './rotorShadowBus'
 
 // ============================================================================
-// 确定性接地投影（3A 白天影子）
-//  · 根因：真实阴影贴图在自定义地形 shader + 强补光下对比度不可靠，
-//    且正午时太阳高度大、真实投影短，用户要求“任何角度都能看到”
-//  · 方案：每台风机下放两层贴地暗化：
-//    1) 接地圆盘（contact disc）：半径 ~14m，始终在塔基，锚定接地感，
-//       正午也有；
-//    2) 定向影带（streak）：沿太阳反方向延伸，长度随太阳高度变化，
-//       晨昏长、正午短但保留最小可见长度，带软边渐变纹理；
-//  · 实现要点：
-//    - 共享 CanvasTexture（streak 64×256、disc 128×128），黑底 alpha 渐变，
-//      MeshBasicMaterial 透明混合（src 黑 × alpha + dst×(1-alpha)）= 压暗；
-//    - depthTest:false + depthWrite:false + renderOrder 保证不被地形起伏遮挡，
-//      同时 y 抬高 0.6~0.9m 避免与能量环 z-fighting；
-//    - 方向：atan2(sunDir.x, sunDir.z)（推导见注释），外层 group Y 旋转，
-//      内层 mesh X -90° 铺平，Y 缩放 = 长度；
-//    - 白天可见、夜晚淡出：opacity = dayF × (base + lowSunBoost)，dayF<0.05 隐藏；
-//    - 长度：elDeg 0→54°，length = 38 + 130×(1 - sinEl)^1.35，
-//      最小 32m（正午仍可见），最大 ~168m（晨昏），在场区压平带内起伏小；
+// 确定性接地投影（第 31 轮重构：叶片投影与真实叶片严格同步）
+//  · 背景：第 29/30 轮的叶片影用手写简化三角函数，与 HoloTurbine 真实变换链
+//    （coneDeg/spinOffset/-tilt/yaw=π-yawDeg/spinRef 自 0 累积）不一致且相位不同步，
+//    用户判「风机阴影形态不正确，叶片投影有问题」。
+//  · 本轮方案：HoloTurbine 每帧用 three 真实矩阵把 3 个叶尖世界坐标写入 rotorShadowBus；
+//    本组件读取后做【物理正确的地面投影】：
+//       shadow = P - t·sunDir，t = (P.y - groundY)/sunDir.y（太阳在 y>0 时）
+//       → 影子沿太阳水平反方向延伸（真实光照几何），长度随太阳高度自然变化。
+//  · 组件构成（每台风机）：
+//    1) 接地暗盘（contact disc）：始终锚定塔基，给接地感，正午也有；
+//    2) 塔影带（tower streak）：沿 -sun.xz 方向的软渐变影带，长度随太阳高度；
+//    3) 叶片投影 ×3：基于总线叶尖世界坐标 → 贴地面投影，形态/方向/长度与真实叶片一致。
+//  · 白天可见、夜晚淡出；都关闭深度测试/深度写入 + 抬高 y 避免 z-fighting。
 // ============================================================================
+
+const SHADOW_COLOR = new THREE.Color('#08101e')
+const DEBUG_SHADOW = typeof location !== 'undefined' && new URLSearchParams(location.search).has('shadowdebug')
+if (DEBUG_SHADOW) SHADOW_COLOR.set('#ff4444') // 调试：亮红验证叶片影网格位置
 
 function makeStreakTexture(): THREE.CanvasTexture {
   const W = 64
@@ -47,17 +37,15 @@ function makeStreakTexture(): THREE.CanvasTexture {
   const d = img.data
   for (let y = 0; y < H; y++) {
     const v = y / (H - 1) // 0=root, 1=tip
-    const lengthAlpha = Math.pow(1 - v, 1.35) // 根部实、尖部虚
-    const wFactor = 1 - v * 0.55 // 尖部收窄
+    const lengthAlpha = Math.pow(1 - v, 1.35)
+    const wFactor = 1 - v * 0.55
     for (let x = 0; x < W; x++) {
-      const u = (x / (W - 1) - 0.5) * 2 // -1..1
+      const u = (x / (W - 1) - 0.5) * 2
       const absU = Math.abs(u)
       let a = 0
       if (absU <= wFactor) {
         const wn = absU / wFactor
-        const widthAlpha = Math.pow(1 - wn, 2.2)
-        a = widthAlpha * lengthAlpha
-        // 根部 0-15% 再加一点实度，让塔基处更明显
+        a = Math.pow(1 - wn, 2.2) * lengthAlpha
         if (v < 0.15) a *= 0.85 + 0.15 * (1 - v / 0.15)
       }
       const idx = (y * W + x) * 4
@@ -85,7 +73,6 @@ function makeDiscTexture(): THREE.CanvasTexture {
   c.height = S
   const ctx = c.getContext('2d')!
   const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2)
-  // 中心最暗，向外快速衰减，边缘完全透明 - 用白色+alpha，由材质 color 着色为深蓝黑
   g.addColorStop(0, 'rgba(255,255,255,0.95)')
   g.addColorStop(0.28, 'rgba(255,255,255,0.55)')
   g.addColorStop(0.55, 'rgba(255,255,255,0.18)')
@@ -100,9 +87,6 @@ function makeDiscTexture(): THREE.CanvasTexture {
   return tex
 }
 
-const SHADOW_COLOR = new THREE.Color('#08101e')
-
-// 共享纹理（模块级单例，client only）
 let sharedStreak: THREE.CanvasTexture | null = null
 let sharedDisc: THREE.CanvasTexture | null = null
 function getSharedTextures() {
@@ -112,18 +96,17 @@ function getSharedTextures() {
   return { streak: sharedStreak, disc: sharedDisc }
 }
 
+/** 地面世界点：把世界坐标 P 沿 -sun 投影到 y=g 平面（物理正确）。 */
+function projectToGround(P: THREE.Vector3, sun: THREE.Vector3, g: number, out: THREE.Vector3): THREE.Vector3 {
+  const t = (P.y - g) / sun.y // sun.y>0 时为正
+  return out.set(P.x - t * sun.x, g, P.z - t * sun.z)
+}
+
 function GroundShadow({ x, z, y, idx }: { x: number; z: number; y: number; idx: number }) {
-  const outerRef = useRef<THREE.Group>(null!)
-  const bladeRootRef = useRef<THREE.Group>(null!)
-  const streakRef = useRef<THREE.Mesh>(null!)
-  const softRef = useRef<THREE.Mesh>(null!)
   const discRef = useRef<THREE.Mesh>(null!)
-  const discOuterRef = useRef<THREE.Mesh>(null!)
-  const streakMatRef = useRef<THREE.MeshBasicMaterial>(null!)
-  const softMatRef = useRef<THREE.MeshBasicMaterial>(null!)
   const discMatRef = useRef<THREE.MeshBasicMaterial>(null!)
-  const discOuterMatRef = useRef<THREE.MeshBasicMaterial>(null!)
-  const spinRef = useRef<number>(idx * 1.91)
+  const towerRef = useRef<THREE.Mesh>(null!)
+  const towerMatRef = useRef<THREE.MeshBasicMaterial>(null!)
   const bladeRefs = [useRef<THREE.Mesh>(null!), useRef<THREE.Mesh>(null!), useRef<THREE.Mesh>(null!)]
   const bladeMatRefs = [
     useRef<THREE.MeshBasicMaterial>(null!),
@@ -131,282 +114,172 @@ function GroundShadow({ x, z, y, idx }: { x: number; z: number; y: number; idx: 
     useRef<THREE.MeshBasicMaterial>(null!),
   ]
 
-  const { streakGeo, discGeo, softGeo, bladeGeo, streakTex, discTex } = useMemo(() => {
+  const { discGeo, towerGeo, bladeGeo, streakTex, discTex } = useMemo(() => {
     const { streak, disc } = getSharedTextures()
-    const sg = new THREE.PlaneGeometry(14, 1)
-    sg.translate(0, 0.5, 0) // 根部在原点，延伸 +Y
-    const soft = new THREE.PlaneGeometry(28, 1)
-    soft.translate(0, 0.5, 0)
-    const bg = new THREE.PlaneGeometry(4.8, 1)
-    bg.translate(0, 0.5, 0)
     const dg = new THREE.CircleGeometry(1, 48)
-    return { streakGeo: sg, softGeo: soft, bladeGeo: bg, discGeo: dg, streakTex: streak, discTex: disc }
+    // 塔影带：单位平面，沿本地 +Y 从根部(0)延伸。
+    const tg = new THREE.PlaneGeometry(16, 1)
+    tg.translate(0, 0.5, 0)
+    // 叶片影：更窄的条带（叶片本身薄）沿本地 +Y。
+    const bg = new THREE.PlaneGeometry(5, 1)
+    bg.translate(0, 0.5, 0)
+    return { discGeo: dg, towerGeo: tg, bladeGeo: bg, streakTex: streak, discTex: disc }
   }, [])
 
-  // 初始材质 - 用深蓝黑而非纯黑，混合后色相可辨，3A 更明显
-  const streakMat = useMemo(() => {
-    return new THREE.MeshBasicMaterial({
-      color: SHADOW_COLOR,
-      map: streakTex ?? undefined,
-      transparent: true,
-      opacity: 0.55,
-      depthWrite: false,
-      depthTest: false,
-      fog: false,
-      toneMapped: false,
-      side: THREE.DoubleSide,
-    })
-  }, [streakTex])
+  const _sun = useMemo(() => new THREE.Vector3(), [])
+  const _hubProj = useMemo(() => new THREE.Vector3(), [])
+  const _tipProj = useMemo(() => new THREE.Vector3(), [])
+  const _dir = useMemo(() => new THREE.Vector3(), [])
+  const _right = useMemo(() => new THREE.Vector3(), [])
+  const _up = useMemo(() => new THREE.Vector3(0, 1, 0), [])
+  const _basis = useMemo(() => new THREE.Matrix4(), [])
 
-  const softMat = useMemo(() => {
-    return new THREE.MeshBasicMaterial({
-      color: SHADOW_COLOR,
-      map: streakTex ?? undefined,
-      transparent: true,
-      opacity: 0.22,
-      depthWrite: false,
-      depthTest: false,
-      fog: false,
-      toneMapped: false,
-      side: THREE.DoubleSide,
-    })
-  }, [streakTex])
+  // 把「铺平在地面、长轴指向 dir、法向朝上」的朝向写入 mesh（无欧拉歧义）。
+  // 几何已 translate(0,+0.5,0)，故本地 +Y 为长轴。world = right/long/normal basis。
+  const orientFlat = (mesh: THREE.Mesh, dirX: number, dirZ: number) => {
+    const len = Math.hypot(dirX, dirZ)
+    if (len < 1e-4) { _dir.set(0, 0, 1); _right.set(1, 0, 0) } else { _dir.set(dirX / len, 0, dirZ / len); _right.crossVectors(_up, _dir) }
+    // 长轴(本地+Y) → _dir；法向(本地+Z) → 上；右(本地+X) → _right
+    _basis.makeBasis(_right, _dir, _up)
+    mesh.quaternion.setFromRotationMatrix(_basis)
+  }
 
-  const discMat = useMemo(() => {
-    return new THREE.MeshBasicMaterial({
-      color: SHADOW_COLOR,
-      map: discTex ?? undefined,
-      transparent: true,
-      opacity: 0.5,
-      depthWrite: false,
-      depthTest: false,
-      fog: false,
-      toneMapped: false,
-      side: THREE.DoubleSide,
-    })
-  }, [discTex])
-
-  const discOuterMat = useMemo(() => {
-    return new THREE.MeshBasicMaterial({
-      color: SHADOW_COLOR,
-      map: discTex ?? undefined,
-      transparent: true,
-      opacity: 0.22,
-      depthWrite: false,
-      depthTest: false,
-      fog: false,
-      toneMapped: false,
-      side: THREE.DoubleSide,
-    })
-  }, [discTex])
-
-  const bladeMat = useMemo(() => {
-    return new THREE.MeshBasicMaterial({
-      color: SHADOW_COLOR,
-      map: streakTex ?? undefined,
-      transparent: true,
-      opacity: 0.38,
-      depthWrite: false,
-      depthTest: false,
-      fog: false,
-      toneMapped: false,
-      side: THREE.DoubleSide,
-    })
-  }, [streakTex])
-
-  const bladeMats = useMemo(() => {
-    return [0, 1, 2].map(
-      () =>
-        new THREE.MeshBasicMaterial({
-          color: SHADOW_COLOR,
-          map: streakTex ?? undefined,
-          transparent: true,
-          opacity: 0.52,
-          depthWrite: false,
-          depthTest: false,
-          fog: false,
-          toneMapped: false,
-          side: THREE.DoubleSide,
-        }),
-    )
-  }, [streakTex])
-
-  useFrame((_, dt) => {
+  useFrame(() => {
     const dayF = skyState.dayF
     const sun = skyState.sunDir
     const visible = dayF > 0.05
-    if (outerRef.current) outerRef.current.visible = visible
-    if (bladeRootRef.current) bladeRootRef.current.visible = visible
     if (!visible) return
+    if (discRef.current) discRef.current.visible = true
+    if (towerRef.current) towerRef.current.visible = true
+    bladeRefs.forEach((b) => { if (b.current) b.current.visible = true })
 
-    const sx = sun.x
-    const sz = sun.z
-    const sy = sun.y
-    const groundLen = Math.hypot(sx, sz)
-    if (groundLen < 1e-4 || sy < 0.02) return
-
-    const angle = Math.atan2(sx, sz)
-    if (outerRef.current) outerRef.current.rotation.y = angle
-
+    _sun.copy(sun)
+    const sy = _sun.y
+    if (sy < 0.02) return
     const sinEl = Math.max(0, Math.min(1, sy))
-    const len = 38 + 130 * Math.pow(1 - sinEl, 1.35)
-    const clampedLen = Math.max(32, Math.min(175, len))
-    const lowBoost = (1 - sinEl) * 0.35
-    const op = dayF * (0.62 + lowBoost)
-    const softOp = dayF * (0.28 + lowBoost * 0.65)
-    const discOp = dayF * 0.78
+    const lowBoost = (1 - sinEl) * 0.4
+    const dayOp = dayF * (0.62 + lowBoost)
 
-    if (streakRef.current) streakRef.current.scale.set(1, clampedLen, 1)
-    if (softRef.current) softRef.current.scale.set(1, clampedLen * 1.08, 1)
-    if (streakMatRef.current) streakMatRef.current.opacity = op
-    if (softMatRef.current) softMatRef.current.opacity = softOp
-    if (discMatRef.current) discMatRef.current.opacity = discOp
-    if (discOuterMatRef.current) discOuterMatRef.current.opacity = discOp * 0.42
-
-    // —— 叶片投影（3 叶片）——
-    const frame = getFarmFrame()
-    const unit = frame?.units[idx]
-    const yawDeg = unit?.yawDeg ?? 0
-    const rpm = unit?.rpm ?? 0
-    const yawRad = D2R(yawDeg)
-    const cosYaw = Math.cos(yawRad)
-    const sinYaw = Math.sin(yawRad)
-
-    // 转子自转累积（与 HoloTurbine 同口径：rpm * PI/30 rad/s，负方向）
-    if (rpm > 0.1) {
-      spinRef.current -= dt * ((rpm * Math.PI) / 30)
+    // —— 接地暗盘 ——
+    if (discMatRef.current) discMatRef.current.opacity = dayF * 0.8
+    // —— 塔影带：沿 -sun.xz 方向，长度随太阳高度 ——
+    const len = Math.max(30, Math.min(180, 40 + 150 * Math.pow(1 - sinEl, 1.3)))
+    const sxz = Math.hypot(_sun.x, _sun.z)
+    if (sxz > 1e-4) {
+      const g = terrainSurfaceY(x, z)
+      // 塔顶(世界)投影到地面
+      const towerTopWorld = _hubProj.set(x, y + 90, z)
+      projectToGround(towerTopWorld, _sun, g, _tipProj)
+      const dx = _tipProj.x - x, dz = _tipProj.z - z
+      const shadowLen = Math.hypot(dx, dz)
+      const clampLen = Math.min(shadowLen * 0.7, len)
+      if (towerRef.current) {
+        towerRef.current.visible = true
+        towerRef.current.position.set(0, 0.7, 0)
+        orientFlat(towerRef.current, dx, dz)
+        towerRef.current.scale.set(1, Math.max(20, clampLen), 1)
+      }
+      if (towerMatRef.current) towerMatRef.current.opacity = dayOp * 0.5
     }
 
-    // 轮毂投影到地面：t = HUB_Y / sy
-    const tHub = HUB_Y / sy
-    const hubShadowX = -sx * tHub
-    const hubShadowZ = -sz * tHub
-    // 叶片阴影透明度：随太阳高度与 dayF，晨昏更浓
-    const bladeBaseOp = dayF * (0.52 + lowBoost * 0.5)
-
-    for (let i = 0; i < 3; i++) {
-      const bAngle = spinRef.current + (i * Math.PI * 2) / 3
-      const sinA = Math.sin(bAngle)
-      const cosA = Math.cos(bAngle)
-      // 叶片局部：(x = -L sin, y = L cos)
-      const xLocal = -BLADE_LEN * sinA
-      const yLocal = BLADE_LEN * cosA
-      // 倾角 5°：绕 X 旋转
-      const yTilt = yLocal * COS_TILT
-      const zTilt = yLocal * SIN_TILT
-      // 偏航：绕 Y 旋转
-      const xWorldOff = xLocal * cosYaw + zTilt * sinYaw
-      const zWorldOff = -xLocal * sinYaw + zTilt * cosYaw
-      const yWorldOff = yTilt
-
-      const tipY = HUB_Y + yWorldOff
-      if (tipY <= 0.5) {
-        // 叶片指向地下，隐藏该叶片影
-        const mr = bladeRefs[i].current
-        if (mr) mr.visible = false
-        continue
-      }
-      const tTip = tipY / sy
-      const tipShadowX = xWorldOff - sx * tTip
-      const tipShadowZ = zWorldOff - sz * tTip
-      const dx = tipShadowX - hubShadowX
-      const dz = tipShadowZ - hubShadowZ
-      const bLen = Math.hypot(dx, dz)
-      if (bLen < 2) {
-        const mr = bladeRefs[i].current
-        if (mr) mr.visible = false
-        continue
-      }
-      const clampedBLen = Math.min(bLen, 140)
-      const bAngleWorld = Math.atan2(dx, dz)
-
-      const mesh = bladeRefs[i].current
-      if (mesh) {
-        mesh.visible = true
-        // 位置：轮毂影子 + 微抬，避免 z-fighting，3 叶片错层 0.015m
-        mesh.position.set(hubShadowX, 0.82 + i * 0.018, hubShadowZ)
-        mesh.rotation.set(-Math.PI / 2, 0, 0)
-        // 先绕 Y 旋转到阴影方向，再缩放长度
-        // 由于几何已 translate(0,0.5,0) 且 X -90°，Y 缩放 = 沿本地 Z 延伸，Y 旋转可定向
-        mesh.rotation.y = bAngleWorld
-        // 为了让旋转生效，需要把 X 旋转与 Y 旋转组合：我们用 rotation.set 时 X=-90°, Y=bAngleWorld 会被覆盖？
-        // three 的 Euler 默认 XYZ，先 X 后 Y，所以设置 X=-90°, Y=bAngleWorld, Z=0 即可
-        mesh.rotation.set(-Math.PI / 2, bAngleWorld, 0)
-        mesh.scale.set(1, clampedBLen, 1)
-      }
-      const mat = bladeMatRefs[i].current
-      if (mat) {
-        // 叶片朝向太阳时影子更淡（点积），侧向时更浓
-        const facing = Math.abs(Math.cos(bAngle)) // 简化：叶片垂直时影子更实
-        mat.opacity = bladeBaseOp * (0.55 + 0.55 * facing)
+    // —— 叶片投影 ×3：读取总线真实世界坐标 → 贴地投影 ——
+    const tipSet = getRotorTips(idx)
+    if (tipSet) {
+      const g = terrainSurfaceY(x, z)
+      const hub = tipSet.hub
+      projectToGround(hub, _sun, g, _hubProj)
+      for (let i = 0; i < 3; i++) {
+        projectToGround(tipSet.tips[i], _sun, g, _tipProj)
+        _dir.set(_tipProj.x - _hubProj.x, 0, _tipProj.z - _hubProj.z)
+        const bLen = Math.hypot(_dir.x, _dir.z)
+        const mesh = bladeRefs[i].current
+        if (mesh) {
+          if (bLen < 2) { mesh.visible = false; continue }
+          mesh.visible = true
+          // 位置：以 hub 投影为根部，用组内局部坐标（组已定位在 (x,y,z)）
+          mesh.position.set(_hubProj.x - x, 0.6 + i * 0.01, _hubProj.z - z)
+          orientFlat(mesh, _dir.x, _dir.z)
+          mesh.scale.set(1, Math.min(bLen, 150), 1)
+        }
+        const mat = bladeMatRefs[i].current
+        if (mat) mat.opacity = dayOp * 0.6
       }
     }
   })
 
   return (
     <group position={[x, y, z]}>
-      <group ref={outerRef}>
+      <mesh
+        ref={discRef}
+        geometry={discGeo}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.5, 0]}
+        scale={[18, 18, 1]}
+        renderOrder={6}
+        frustumCulled={false}
+      >
+        <meshBasicMaterial
+          ref={discMatRef}
+          color={SHADOW_COLOR}
+          map={discTex ?? undefined}
+          transparent
+          opacity={0}
+          depthWrite={false}
+          depthTest={false}
+          fog={false}
+          toneMapped={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      <mesh
+        ref={towerRef}
+        geometry={towerGeo}
+        position={[0, 0.7, 0]}
+        renderOrder={8}
+        frustumCulled={false}
+      >
+        <meshBasicMaterial
+          ref={towerMatRef}
+          color={SHADOW_COLOR}
+          map={streakTex ?? undefined}
+          transparent
+          opacity={0}
+          depthWrite={false}
+          depthTest={false}
+          fog={false}
+          toneMapped={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {[0, 1, 2].map((i) => (
         <mesh
-          ref={discOuterRef}
-          geometry={discGeo}
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, 0.42, 0]}
-          scale={[34, 34, 1]}
-          renderOrder={6}
+          key={`blade-${i}`}
+          ref={bladeRefs[i]}
+          geometry={bladeGeo}
+          renderOrder={9 + i}
+          frustumCulled={false}
         >
-          <primitive object={discOuterMat} ref={discOuterMatRef} attach="material" />
+          <meshBasicMaterial
+            ref={bladeMatRefs[i]}
+            color={SHADOW_COLOR}
+            map={streakTex ?? undefined}
+            transparent
+            opacity={0}
+            depthWrite={false}
+            depthTest={false}
+            fog={false}
+            toneMapped={false}
+            side={THREE.DoubleSide}
+          />
         </mesh>
-        <mesh
-          ref={discRef}
-          geometry={discGeo}
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, 0.55, 0]}
-          scale={[18, 18, 1]}
-          renderOrder={9}
-        >
-          <primitive object={discMat} ref={discMatRef} attach="material" />
-        </mesh>
-        <mesh
-          ref={softRef}
-          geometry={softGeo}
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, 0.65, 0]}
-          renderOrder={7}
-        >
-          <primitive object={softMat} ref={softMatRef} attach="material" />
-        </mesh>
-        <mesh
-          ref={streakRef}
-          geometry={streakGeo}
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, 0.78, 0]}
-          renderOrder={8}
-        >
-          <primitive object={streakMat} ref={streakMatRef} attach="material" />
-        </mesh>
-      </group>
-      {/* 叶片投影根：不随 outerRef 旋转，世界坐标直接计算 */}
-      <group ref={bladeRootRef}>
-        {[0, 1, 2].map((i) => (
-          <mesh
-            key={`blade-${i}`}
-            ref={bladeRefs[i]}
-            geometry={bladeGeo}
-            renderOrder={10 + i}
-          >
-            <primitive object={bladeMats[i]} ref={bladeMatRefs[i]} attach="material" />
-          </mesh>
-        ))}
-        {/* 兼容旧引用，保留 bladeMat 单例以防未使用 */}
-        <mesh geometry={bladeGeo} visible={false}>
-          <primitive object={bladeMat} attach="material" />
-        </mesh>
-      </group>
+      ))}
     </group>
   )
 }
 
 export default function GroundShadows() {
+  // 调试开关：?noshadow 关闭接地投影（用于排除法定位暗斑来源）
+  if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('noshadow')) return null
   return (
     <group>
       {FARM.map((u, i) => (

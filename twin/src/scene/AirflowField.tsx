@@ -279,6 +279,8 @@ export default function AirflowField() {
     cp.needsUpdate = true
   })
 
+  // 调试开关：?wakeoff 关闭 AirflowField 尾流视觉（用于排除法定位暗斑来源）
+  if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('wakeoff')) return null
   return (
     <group>
       <primitive object={streaks} />
