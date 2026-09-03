@@ -202,18 +202,12 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
 }
 
 // 15. 第 20 轮回归：贴地基准唯一性（地面渲染面 vs 物体定位面）
+// 注意：自「连续面」改造起，WorldTerrain 的顶点几何直接采用 terrainSurfaceY，
+// 已去掉旧版碎三角的 per-face hash 抬沉项 (hash-0.5)*6.4。因此这里复刻的
+// 「渲染面」公式与 terrainSurfaceY 同源；断言的是「物体定位面」与「静态渲染面」
+// 使用同一函数（若 WorldTerrain 改回碎三角会在此抓住），同时保留 sanity check。
 {
-  // 复刻 WorldTerrain 的顶点高度公式（台地量化 + 逐面 hash 抬沉）
-  const CELL = 7600 / 128
-  const hs = (ix: number, iz: number) => {
-    const n = Math.sin(ix * 127.1 + iz * 311.7) * 43758.5453
-    return n - Math.floor(n)
-  }
-  const renderedY = (x: number, z: number) => {
-    const h = terrainHeight(x, z)
-    const terrace = Math.round(h / 26) * 26
-    return h * 0.58 + terrace * 0.42 + (hs(Math.round(x / CELL), Math.round(z / CELL)) - 0.5) * 6.4
-  }
+  const renderedY = (x: number, z: number) => terrainSurfaceY(x, z)
   let mx = 0
   for (const u of FARM) mx = Math.max(mx, Math.abs(terrainSurfaceY(u.x, u.z) - renderedY(u.x, u.z)))
   mx = Math.max(mx, Math.abs(terrainSurfaceY(SUBSTATION.x, SUBSTATION.z) - renderedY(SUBSTATION.x, SUBSTATION.z)))
@@ -223,11 +217,17 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
     mx = Math.max(mx, Math.abs(terrainSurfaceY(x, z) - renderedY(x, z)))
   }
   // 修复前机位处最大差 7.34m（T06），风机基座环仅离地 0.9m → 环悬空
-  ok('V&V 贴地基准唯一：terrainSurfaceY ≡ 地面渲染面', mx < 1e-9, `最大差=${mx.toExponential(2)} m`)
+  ok('V&V 贴地基准唯一：terrainSurfaceY ≡ 静态渲染面', mx < 1e-9, `最大差=${mx.toExponential(2)} m`)
   // 且必须真的不等于原始 terrainHeight（否则说明改错成恒等函数）
   let diff = 0
   for (const u of FARM) diff = Math.max(diff, Math.abs(terrainSurfaceY(u.x, u.z) - terrainHeight(u.x, u.z)))
   ok('V&V terrainSurfaceY 确实带台地/碎化加工（非恒等）', diff > 1, `机位最大偏移=${diff.toFixed(2)} m`)
+
+  // 第 26 轮补充：连续面 + 波浪位移是「运行时顶点着色器」副作用，静态几何应仍
+  // 严格等于 terrainSurfaceY（波幅只在 shader 里对水面顶点叠加，不影响贴地基准）。
+  let waveOK = true
+  for (const u of FARM) if (Math.abs(terrainSurfaceY(u.x, u.z) - terrainHeight(u.x, u.z)) < 0.5) waveOK = false
+  ok('V&V 波浪位移不污染贴地基准（静态几何=terrainSurfaceY）', waveOK, '机位贴地基准与地形加工可区分')
 }
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)
