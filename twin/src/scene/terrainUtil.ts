@@ -58,16 +58,18 @@ const smoothstep = (e0: number, e1: number, x: number) => {
  * 注意不含波浪位移（那是顶点着色器里的时变项，逐帧起伏，
  * 贴地物体跟随它反而会抖；波浪振幅在场区已按距离收敛）。
  */
+/**
+ * 地面连续化（用户诉求：完整连续表面，非碎三角）。
+ * 旧版：h*0.58+terrace*0.42 + 逐面 hash 抬沉 (hash-0.5)*6.4 → 每三角面独立高度，
+ * 导致视觉上碎裂。为连续化，去掉 per-face lift，保留台地量化与基础地形，
+ * 仅叠加极小连续噪声（<0.6m）避免完全平板。
+ */
 export function terrainSurfaceY(x: number, z: number): number {
   const h = terrainHeight(x, z)
   const terrace = Math.round(h / 26) * 26
-  const CELL = 7600 / 128
-  const hs = (ix: number, iz: number) => {
-    const n = Math.sin(ix * 127.1 + iz * 311.7) * 43758.5453
-    return n - Math.floor(n)
-  }
-  const lift = (hs(Math.round(x / CELL), Math.round(z / CELL)) - 0.5) * 6.4
-  return h * 0.58 + terrace * 0.42 + lift
+  // 极小连续起伏，基于低频 fbm，避免碎裂
+  const micro = N.fbm(x * 0.012 + 1.7, z * 0.012 - 2.3, 2) * 0.6
+  return h * 0.58 + terrace * 0.42 + micro
 }
 
 export function terrainHeight(x: number, z: number): number {
