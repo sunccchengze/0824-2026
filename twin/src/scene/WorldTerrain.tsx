@@ -176,22 +176,22 @@ void main() {
   vec3 waterCol = mix(deepCol, shallowCol, crest * 0.66);
 
   // 天空反射：低饱和灰青蓝（白天）→ 近黑（夜），权重压低避免整片洗灰
-  vec3 skyRef = mix(vec3(0.016, 0.036, 0.060), vec3(0.180, 0.340, 0.440), uDayF);
-  waterCol = mix(waterCol, skyRef, clamp(fres, 0.0, 1.0) * (0.07 + 0.11 * uDayF));
+  vec3 skyRef = mix(vec3(0.014, 0.032, 0.054), vec3(0.150, 0.290, 0.385), uDayF);
+  waterCol = mix(waterCol, skyRef, clamp(fres, 0.0, 1.0) * (0.055 + 0.085 * uDayF));
 
-  // —— 太阳/月亮镜面高光：细碎点状波光（关键：点状，非云斑）——
+  // —— 太阳/月亮镜面高光：细碎点状波光（点状，克制，不高亮成云斑）——
   vec3 halfV = normalize(V + uSunDir);
-  float spec = pow(max(dot(Ns, halfV), 0.0), 520.0 + night * 300.0);
+  float spec = pow(max(dot(Ns, halfV), 0.0), 620.0 + night * 320.0);
   float sparkle = fbm(vWPos.xz * 0.12 + uTime * 0.8) * fbm(vWPos.xz * 0.35 - uTime * 0.5);
-  spec *= (0.15 + 0.85 * sparkle);
-  vec3 sunCol = mix(vec3(0.11, 0.26, 0.38), vec3(0.86, 0.86, 0.82), uDayF);
-  waterCol += sunCol * spec * (uDayF * 1.2 + night * 0.18);
+  spec *= (0.10 + 0.90 * sparkle);
+  vec3 sunCol = mix(vec3(0.11, 0.26, 0.38), vec3(0.80, 0.80, 0.78), uDayF);
+  waterCol += sunCol * spec * (uDayF * 0.9 + night * 0.16);
 
-  // —— 波峰泡沫：只在 crest 且被噪声打散成稀疏不规则浪花（克制）——
-  float foamNoise = fbm(vWPos.xz * 0.02 + uTime * 0.05 + crest * 2.5);
-  float foamMask = smoothstep(0.60, 1.02, crest) * (0.18 + 0.82 * smoothstep(0.48, 0.80, foamNoise));
-  vec3 foam = mix(vec3(0.035, 0.08, 0.12), vec3(0.58, 0.72, 0.77), uDayF); // 低饱和淡青白
-  waterCol = mix(waterCol, foam, foamMask * (0.12 + uDayF * 0.30));
+  // —— 波峰泡沫：只在 crest，且提频打散成细碎稀疏浪花（克制；避免大块云斑）——
+  float foamNoise = fbm(vWPos.xz * 0.075 + uTime * 0.06 + crest * 3.0);
+  float foamMask = smoothstep(0.66, 0.98, crest) * (0.10 + 0.60 * smoothstep(0.58, 0.86, foamNoise));
+  vec3 foam = mix(vec3(0.028, 0.06, 0.09), vec3(0.50, 0.63, 0.68), uDayF); // 更低饱淡青白
+  waterCol = mix(waterCol, foam, foamMask * (0.08 + uDayF * 0.18));
 
   // —— 夜间暗潮微光：极弱青蓝涌动 ——
   float moonSpec = pow(max(dot(Ns, halfV), 0.0), 220.0);

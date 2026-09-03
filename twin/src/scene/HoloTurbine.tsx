@@ -6,7 +6,6 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import {
   getTurbineGeos, TURBINE_SPEC as S, PERIM, STATIONS, TOWER_PROFILE, towerRadiusAtY,
 } from './turbine/geometry'
-import { pushRotorTips } from './rotorShadowBus'
 
 // ============================================================================
 // AEOLUS — 全息纯白线稿风机（v3：合批 + 物理朝向 + 状态语义）
@@ -379,6 +378,44 @@ import { skyState } from './lightState'
 // ---------------------------------------------------------------------------
 // 单个机组
 // ---------------------------------------------------------------------------
+// —— 接地投影辅助（第 31 轮）——
+const _shadowUp = new THREE.Vector3(0, 1, 0)
+const _shadowDir = new THREE.Vector3()
+const _shadowRight = new THREE.Vector3()
+const _shadowBasis = new THREE.Matrix4()
+
+// ============================================================================
+// 叶片投影开关 —【待解决 / 移交项】
+// 背景：本机用 3 个不可见叶尖标记（getWorldPosition）+ projectToGroundY 得到真实
+//  叶尖的地面投影，理论上应与真实叶片严格同步。但实测：3 条影带（PlaneGeometry
+//  2.2m 宽 × 最长 100m）+ shadowTex 的宽度衰减叠加后，从低角/俯视会绕成一个
+//  「大软圆盘」而非 3 条清晰射线——疑似 orientShadow 的 makeBasis 旋转与纹理
+//  宽度羽化共同作用，导致影带展宽成面。塔基接地盘 + 塔影带形态正确，故本轮先
+//  停用叶片影（ENABLE_BLADE_SHADOW = false），保留前两者。
+//  后续接手者建议：
+//   a) 叶片影改用「细线/窄三角」而非带羽化纹理的宽平面，或直接复用真实叶片
+//      截面（bladeRibSet）投影；
+//   b) 复核 orientShadow 的 basis：_shadowRight = cross(up, dir) 可能使宽轴≠法向，
+//      导致贴地平面被旋转成斜交、放大成面；可改用 setFromUnitVectors 或欧拉铺平；
+//   c) 影带长度不再按 0.7 系数截断（应按 t=(P.y-g)/sun.y 完整投影），避免近视模糊。
+// ============================================================================
+const ENABLE_BLADE_SHADOW = false
+
+/** 把世界坐标 P 沿 -sun 投影到 y=g 平面（物理正确，sun.y>0）。 */
+function projectToGroundY(P: THREE.Vector3, sun: THREE.Vector3, g: number, out: THREE.Vector3): THREE.Vector3 {
+  const t = (P.y - g) / sun.y
+  return out.set(P.x - t * sun.x, g, P.z - t * sun.z)
+}
+
+/** 把「铺平在地面、长轴指向 dir、法向朝上」的朝向写入 mesh（无欧拉歧义）。 */
+function orientShadow(mesh: THREE.Mesh, dirX: number, dirZ: number): void {
+  const len = Math.hypot(dirX, dirZ)
+  if (len < 1e-4) { _shadowDir.set(0, 0, 1); _shadowRight.set(1, 0, 0) }
+  else { _shadowDir.set(dirX / len, 0, dirZ / len); _shadowRight.crossVectors(_shadowUp, _shadowDir) }
+  _shadowBasis.makeBasis(_shadowRight, _shadowDir, _shadowUp)
+  mesh.quaternion.setFromRotationMatrix(_shadowBasis)
+}
+
 export default function HoloTurbine({ idx, x, z, y, servo }: {
   idx: number
   x: number; z: number; y: number
@@ -449,6 +486,69 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
     })
   }, [])
 
+  // —— 接地投影（第 31 轮，并入风机自身：影子与真实叶片严格同步、零跨组件状态）——
+  const shadowDisc = useRef<THREE.Mesh>(null!)
+  const shadowTower = useRef<THREE.Mesh>(null!)
+  const shadowBlades = [useRef<THREE.Mesh>(null!), useRef<THREE.Mesh>(null!), useRef<THREE.Mesh>(null!)]
+  const shadowTowerMat = useRef<THREE.MeshBasicMaterial>(null!)
+  const shadowDiscMat = useRef<THREE.MeshBasicMaterial>(null!)
+  const shadowBladeMats = [useRef<THREE.MeshBasicMaterial>(null!), useRef<THREE.MeshBasicMaterial>(null!), useRef<THREE.MeshBasicMaterial>(null!)]
+
+  const shadowGeo = useMemo(() => {
+    const disc = new THREE.CircleGeometry(1, 48)
+    const tower = new THREE.PlaneGeometry(14, 1); tower.translate(0, 0.5, 0)
+    const blade = new THREE.PlaneGeometry(2.2, 1); blade.translate(0, 0.5, 0)
+    return { disc, tower, blade }
+  }, [])
+
+  // 影子纹理（黑底 alpha 渐变，贴地压暗）
+  const shadowTex = useMemo(() => {
+    if (typeof document === 'undefined') return null
+    const c = document.createElement('canvas'); c.width = 64; c.height = 256
+    const ctx = c.getContext('2d')!
+    const img = ctx.createImageData(64, 256)
+    for (let y = 0; y < 256; y++) {
+      const v = y / 255
+      const lenA = Math.pow(1 - v, 1.35)
+      const wf = 1 - v * 0.55
+      for (let x = 0; x < 64; x++) {
+        const u = (x / 63 - 0.5) * 2
+        const au = Math.abs(u)
+        let a = 0
+        if (au <= wf) a = Math.pow(1 - au / wf, 2.2) * lenA
+        const i = (y * 64 + x) * 4
+        img.data[i] = 255; img.data[i + 1] = 255; img.data[i + 2] = 255
+        img.data[i + 3] = Math.round(a * 255)
+      }
+    }
+    ctx.putImageData(img, 0, 0)
+    const tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.NoColorSpace
+    tex.wrapS = THREE.ClampToEdgeWrapping; tex.wrapT = THREE.ClampToEdgeWrapping
+    tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter
+    return tex
+  }, [])
+
+  const shadowDiscTex = useMemo(() => {
+    if (typeof document === 'undefined') return null
+    const c = document.createElement('canvas'); c.width = 128; c.height = 128
+    const ctx = c.getContext('2d')!
+    const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64)
+    g.addColorStop(0, 'rgba(255,255,255,0.95)')
+    g.addColorStop(0.28, 'rgba(255,255,255,0.55)')
+    g.addColorStop(0.55, 'rgba(255,255,255,0.18)')
+    g.addColorStop(0.82, 'rgba(255,255,255,0.04)')
+    g.addColorStop(1, 'rgba(255,255,255,0)')
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128)
+    const tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.NoColorSpace
+    return tex
+  }, [])
+
+  // 影子世界坐标 → 投影到地面 → 转风机局部，驱动 mesh（与前面 world 投影共用临时对象）
+  const _sProj = useMemo(() => new THREE.Vector3(), [])
+  const _sDir = useMemo(() => new THREE.Vector3(), [])
+
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime
     assets.shell.uniforms.uTime.value = t
@@ -504,16 +604,61 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
     spinRef.current -= dt * ((u.rpm * Math.PI) / 30)
     if (spin.current) spin.current.rotation.z = spinRef.current
 
-    // 把 3 个叶尖 + 轮毂的真实世界坐标写入总线（供 GroundShadows 投影）。
-    // localToWorld 用场景图真实矩阵（含 spin/tilt/yaw），投影与真实叶片严格同步。
-    if (spin.current && hubMarker.current && tipMarkers[0].current) {
-      const hub = hubMarker.current.getWorldPosition(new THREE.Vector3())
-      const tips = [
-        tipMarkers[0].current.getWorldPosition(new THREE.Vector3()),
-        tipMarkers[1].current.getWorldPosition(new THREE.Vector3()),
-        tipMarkers[2].current.getWorldPosition(new THREE.Vector3()),
-      ] as [THREE.Vector3, THREE.Vector3, THREE.Vector3]
-      pushRotorTips(idx, { hub, tips, bladeLen: S.bladeLen, hubY: S.hubY })
+    // 接地投影（并入本风机，影子与真实叶片严格同步、零跨组件时序依赖）。
+    // sunDir 指向太阳；影子沿 -sun 落到 y=ground 平面。
+    const sun = skyState.sunDir
+    if (spin.current && tipMarkers[0].current && sun.y > 0.02) {
+      // 地面基准 = 风机基座高度（terrainSurfaceY 已由调用方定位）
+      const groundY = y
+      const hub = hubMarker.current.getWorldPosition(_sProj) // 轮毂世界
+      // 接地暗盘
+      if (shadowDisc.current && shadowDiscMat.current) {
+        shadowDisc.current.visible = true
+        shadowDiscMat.current.opacity = dayF * 0.6
+        shadowDisc.current.scale.set(14, 14, 1)
+      }
+      // 塔影带：塔顶(轮毂)世界投影 → 沿 -sun 方向
+      const tH = (hub.y - groundY) / sun.y
+      const towerDx = -tH * sun.x, towerDz = -tH * sun.z
+      const towerLen = Math.min(Math.hypot(towerDx, towerDz) * 0.7, 175)
+      if (shadowTower.current && shadowTowerMat.current) {
+        shadowTower.current.visible = true
+        shadowTower.current.position.set(0, 0.7, 0)
+        orientShadow(shadowTower.current, towerDx, towerDz)
+        shadowTower.current.scale.set(1, Math.max(20, towerLen), 1)
+        const sinEl = Math.max(0, Math.min(1, sun.y))
+        shadowTowerMat.current.opacity = dayF * (0.62 + (1 - sinEl) * 0.4) * 0.38
+      }
+      // 叶片投影（待解决/移交：见上方 ENABLE_BLADE_SHADOW 说明，默认关闭）
+      if (ENABLE_BLADE_SHADOW) {
+        projectToGroundY(hub, sun, groundY, _sProj)
+        for (let i = 0; i < 3; i++) {
+          const tipW = tipMarkers[i].current.getWorldPosition(new THREE.Vector3())
+          projectToGroundY(tipW, sun, groundY, _sDir)
+          const dx = _sDir.x - _sProj.x, dz = _sDir.z - _sProj.z
+          const blen = Math.hypot(dx, dz)
+          const mesh = shadowBlades[i].current
+          if (mesh) {
+            if (blen < 2) { mesh.visible = false; continue }
+            mesh.visible = true
+            mesh.position.set(_sProj.x - x, 0.6 + i * 0.01, _sProj.z - z)
+            orientShadow(mesh, dx, dz)
+            mesh.scale.set(1, Math.min(blen, 100), 1)
+          }
+          const mat = shadowBladeMats[i].current
+          if (mat) {
+            const sinEl = Math.max(0, Math.min(1, sun.y))
+            mat.opacity = dayF * (0.62 + (1 - sinEl) * 0.4) * 0.55
+          }
+        }
+      } else {
+        shadowBlades.forEach((b) => { if (b.current) b.current.visible = false })
+      }
+    } else {
+      // 夜晚/太阳过低：隐藏影子
+      if (shadowDisc.current) shadowDisc.current.visible = false
+      if (shadowTower.current) shadowTower.current.visible = false
+      shadowBlades.forEach((b) => { if (b.current) b.current.visible = false })
     }
     // 偏航：机头基向朝北（迎风，A4 修正）；正偏航 = 方位向东
     if (root.current) {
@@ -545,6 +690,42 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
 
   return (
     <group position={[x, y, z]}>
+      {/* 接地投影（第 31 轮）：接地盘 + 塔影带 + 叶片影，全部用本地坐标（组原点=地面） */}
+      <mesh
+        ref={shadowDisc}
+        geometry={shadowGeo.disc}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.5, 0]}
+        scale={[18, 18, 1]}
+        renderOrder={6}
+        frustumCulled={false}
+        visible={false}
+      >
+        <meshBasicMaterial ref={shadowDiscMat} color="#08101e" map={shadowDiscTex ?? undefined} transparent depthWrite={false} depthTest={false} fog={false} toneMapped={false} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh
+        ref={shadowTower}
+        geometry={shadowGeo.tower}
+        position={[0, 0.7, 0]}
+        renderOrder={8}
+        frustumCulled={false}
+        visible={false}
+      >
+        <meshBasicMaterial ref={shadowTowerMat} color="#08101e" map={shadowTex ?? undefined} transparent depthWrite={false} depthTest={false} fog={false} toneMapped={false} side={THREE.DoubleSide} />
+      </mesh>
+      {[0, 1, 2].map((i) => (
+        <mesh
+          key={`shadowblade-${i}`}
+          ref={shadowBlades[i]}
+          geometry={shadowGeo.blade}
+          renderOrder={9 + i}
+          frustumCulled={false}
+          visible={false}
+        >
+          <meshBasicMaterial ref={shadowBladeMats[i]} color="#08101e" map={shadowTex ?? undefined} transparent depthWrite={false} depthTest={false} fog={false} toneMapped={false} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
+
       {/* 基座暗盘（C2 收敛） */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.5, 0]} renderOrder={0}>
         <circleGeometry args={[11, 48]} />
@@ -600,7 +781,7 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
             <lineSegments geometry={assets.merged.rotorRibs} material={assets.rib} renderOrder={2} />
             <lineSegments geometry={assets.merged.rotorHalo} material={assets.halo} renderOrder={3} />
             <lineSegments geometry={assets.merged.rotorCore} material={assets.core} renderOrder={4} />
-            {/* 不可见叶尖/轮毂标记：供 GroundShadows 读取真实世界坐标（投影同步） */}
+            {/* 不可见叶尖/轮毂标记：本机用真实矩阵算叶片投影（影子与转子严格同步） */}
             <object3D ref={hubMarker} />
             {tipLocalOffsets.map((p, i) => (
               <object3D key={`tip-${i}`} ref={tipMarkers[i]} position={[p.x, p.y, p.z]} />
