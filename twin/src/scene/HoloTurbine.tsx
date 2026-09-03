@@ -395,7 +395,10 @@ const _shadowBasis = new THREE.Matrix4()
 //  a) 叶片影改「根部宽→尖端窄」的梯形面（真实叶片弦向渐缩），配独立
 //     硬核纹理 bladeShadowTex（中心 55% 全 alpha，仅边缘窄羽化）→ 轮廓清晰；
 //  b) orientShadow 改 cross(dir, up) → 右手系，长轴严格沿投影方向、宽轴水平；
-//  c) 影带长度按 t=(P.y-g)/sun.y 完整投影（不再 0.7 截断），上限 175m 与塔影一致。
+//  c) 影带长度按 t=(P.y-g)/sun.y 完整投影（不再 0.7 截断），上限 440m；
+//  d) 【关键】塔影带也改完整物理投影（塔底 → 轮毂投影点，上限 640m），
+//     使塔影带远端与叶片影锚点（轮毂投影）严丝合缝——旧版塔影 175m 截断、
+//     叶片影锚在 400m+ 外，日出低角时叶片影成为离机 400m 的「孤儿暗斑」。
 // ============================================================================
 const ENABLE_BLADE_SHADOW = true
 
@@ -654,10 +657,12 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
         shadowDiscMat.current.opacity = dayF * 0.6
         shadowDisc.current.scale.set(14, 14, 1)
       }
-      // 塔影带：塔顶(轮毂)世界投影 → 沿 -sun 方向
+      // 塔影带：塔顶(轮毂)世界投影 → 沿 -sun 方向。
+      // 长度 = 完整物理投影（塔底 → 轮毂投影点，上限 640m），
+      // 远端与叶片影锚点（同一轮毂投影点）无缝衔接，不再 0.7 截断。
       const tH = (hub.y - groundY) / sun.y
       const towerDx = -tH * sun.x, towerDz = -tH * sun.z
-      const towerLen = Math.min(Math.hypot(towerDx, towerDz) * 0.7, 175)
+      const towerLen = Math.min(Math.hypot(towerDx, towerDz), 640)
       if (shadowTower.current && shadowTowerMat.current) {
         shadowTower.current.visible = true
         shadowTower.current.position.set(0, 0.7, 0)
@@ -666,7 +671,7 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
         const sinEl = Math.max(0, Math.min(1, sun.y))
         shadowTowerMat.current.opacity = dayF * (0.62 + (1 - sinEl) * 0.4) * 0.38
       }
-      // 叶片投影：3 条射线从轮毂投影指向各叶尖投影（完整投影，上限 175m 与塔影一致）
+      // 叶片投影：3 条射线从轮毂投影指向各叶尖投影（完整投影，上限 440m 与塔影衔接）
       if (ENABLE_BLADE_SHADOW) {
         projectToGroundY(hub, sun, groundY, _sProj)
         for (let i = 0; i < 3; i++) {
@@ -680,12 +685,12 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
             mesh.visible = true
             mesh.position.set(_sProj.x - x, 0.6 + i * 0.02, _sProj.z - z)
             orientShadow(mesh, dx, dz)
-            mesh.scale.set(1, Math.min(blen, 175), 1)
+            mesh.scale.set(1, Math.min(blen, 440), 1)
           }
           const mat = shadowBladeMats[i].current
           if (mat) {
             const sinEl = Math.max(0, Math.min(1, sun.y))
-            mat.opacity = dayF * (0.62 + (1 - sinEl) * 0.4) * 0.45
+            mat.opacity = dayF * (0.62 + (1 - sinEl) * 0.4) * 0.42
           }
         }
       } else {
