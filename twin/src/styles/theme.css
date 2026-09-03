@@ -74,12 +74,12 @@ button { font-family: inherit; }
 }
 .topbar .title {
   position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
-  margin: 0; font-family: var(--font-num); font-size: 32px; font-weight: 700;
+  margin: 0; font-family: var(--font-cn); font-size: 32px; font-weight: 700;
   letter-spacing: 0.36em; text-indent: 0.36em;
   color: #eefbff; white-space: nowrap;
-  background: linear-gradient(180deg, #ffffff 10%, #c8f0ff 48%, #7fdcff 100%);
+  background: linear-gradient(180deg, #ffffff 12%, #d6f3ff 42%, #8fe2ff 78%, #5ec8f0 100%);
   -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 14px rgba(90, 200, 255, 0.55)) drop-shadow(0 0 36px rgba(80, 200, 255, 0.28)) drop-shadow(0 1px 0 rgba(0,0,0,0.8));
+  filter: drop-shadow(0 0 14px rgba(90, 200, 255, 0.6)) drop-shadow(0 0 36px rgba(80, 200, 255, 0.32)) drop-shadow(0 0 64px rgba(60,160,200,0.22)) drop-shadow(0 1px 0 rgba(0,0,0,0.9));
 }
 .topbar .title::after {
   content: ''; position: absolute; left: 12%; right: 12%; bottom: -6px; height: 1px;
