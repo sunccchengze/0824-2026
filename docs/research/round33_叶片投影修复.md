@@ -85,9 +85,9 @@ round31 把接地投影并入风机自身（真实转子矩阵取叶尖世界坐
 
 | 场景 | 文件 | 说明 |
 |---|---|---|
-| 日出 hero（默认 t=6） | `r33_blade_hero_afternoon.png` | 长塔影 + 叶片射线与风机连成一体，无孤儿暗斑 |
-| 正午俯视单机 | `r33_blade_noon_topdown.png` | `t=11.5`：接地盘 + 塔影 + 3 条叶片射线，轮廓清晰 |
-| 午后 hero | `r33_blade_afternoon_topdown.png` | `t=15.5`：中等长度塔影 + 叶片射线衔接自然 |
+| 日出 hero（默认 t=6） | `r33_blade_t6_sunrise_hero.png` | 长塔影 + 叶片射线与风机连成一体，无孤儿暗斑 |
+| 正午俯视单机 | `r33_blade_t11_noon_topdown.png` | `t=11.5`：接地盘 + 塔影 + 3 条叶片射线，轮廓清晰 |
+| 午后 hero | `r33_blade_t15_afternoon_hero.png` | `t=15.5`：中等长度塔影 + 叶片射线衔接自然 |
 
 ## 五、涉及文件
 
