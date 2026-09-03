@@ -38,36 +38,99 @@ button { font-family: inherit; }
 }
 .hud .stage > * { pointer-events: auto; }
 
-/* ===== 顶部通栏 ===== */
-.topbar { position: absolute; left: 0; top: 0; width: 1920px; height: 66px; }
-.topbar .title {
-  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
-  margin: 0; font-size: 30px; font-weight: 600; letter-spacing: 0.34em; text-indent: 0.34em;
-  color: #f0fbff; white-space: nowrap;
-  text-shadow: 0 0 22px rgba(80, 200, 255, 0.45), 0 0 60px rgba(80, 200, 255, 0.2);
+/* ===== 顶部通栏 · 高科技重塑（修复文字&横线重叠） ===== */
+.topbar {
+  position: absolute; left: 0; top: 0; width: 1920px; height: 74px;
+  background:
+    linear-gradient(180deg, rgba(9, 28, 48, 0.96) 0%, rgba(5, 18, 32, 0.9) 42%, rgba(2, 10, 20, 0.82) 100%);
+  border-bottom: 1px solid rgba(110, 215, 255, 0.22);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 6px 28px rgba(0, 0, 0, 0.4),
+    0 0 28px rgba(0, 130, 210, 0.14),
+    inset 0 1px 0 rgba(160, 230, 255, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px) saturate(1.15);
+  overflow: hidden;
 }
-.topbar .wings { position: absolute; top: 8px; opacity: 0.9; }
-.topbar .wings:first-of-type { left: 50%; margin-left: -628px; transform: scaleX(-1); }
-.topbar .wings.flip { left: 50%; margin-left: 248px; }
+.topbar::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(130, 220, 255, 0.2) 10%,
+    rgba(150, 235, 255, 0.85) 26%,
+    rgba(200, 245, 255, 1) 50%,
+    rgba(150, 235, 255, 0.85) 74%,
+    rgba(130, 220, 255, 0.2) 90%,
+    transparent 100%);
+  box-shadow: 0 0 12px rgba(120, 220, 255, 0.6);
+}
+.topbar::after {
+  content: ''; position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(90, 200, 255, 0.04) 18%, transparent 32%, transparent 68%, rgba(90, 200, 255, 0.04) 82%, transparent 100%),
+    repeating-linear-gradient(90deg, rgba(110, 200, 245, 0.03) 0 1px, transparent 1px 48px);
+  pointer-events: none;
+}
+.topbar .title {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+  margin: 0; font-family: var(--font-num); font-size: 32px; font-weight: 700;
+  letter-spacing: 0.36em; text-indent: 0.36em;
+  color: #eefbff; white-space: nowrap;
+  background: linear-gradient(180deg, #ffffff 10%, #c8f0ff 48%, #7fdcff 100%);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 14px rgba(90, 200, 255, 0.55)) drop-shadow(0 0 36px rgba(80, 200, 255, 0.28)) drop-shadow(0 1px 0 rgba(0,0,0,0.8));
+}
+.topbar .title::after {
+  content: ''; position: absolute; left: 12%; right: 12%; bottom: -6px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(120, 220, 255, 0.7), transparent);
+  filter: blur(0.6px);
+}
+.topbar .wings { position: absolute; top: 10px; opacity: 0.92; filter: drop-shadow(0 0 6px rgba(90,200,255,0.25)); }
+.topbar .wings:first-of-type { left: 50%; margin-left: -660px; transform: scaleX(-1); }
+.topbar .wings.flip { left: 50%; margin-left: 276px; }
 .topbar .tline {
-  position: absolute; left: 0; right: 0; bottom: 8px; height: 2px;
-  background: linear-gradient(90deg, transparent 0%, rgba(90, 205, 255, 0.55) 12%, rgba(90, 205, 255, 0.55) 88%, transparent 100%);
-  box-shadow: 0 0 10px rgba(90, 205, 255, 0.45);
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(90, 205, 255, 0.12) 6%,
+    rgba(90, 205, 255, 0.48) 18%,
+    rgba(140, 225, 255, 0.82) 36%,
+    rgba(200, 245, 255, 0.95) 50%,
+    rgba(140, 225, 255, 0.82) 64%,
+    rgba(90, 205, 255, 0.48) 82%,
+    rgba(90, 205, 255, 0.12) 94%,
+    transparent 100%);
+  box-shadow: 0 0 14px rgba(90, 210, 255, 0.55), 0 0 28px rgba(80, 200, 255, 0.22), 0 1px 0 rgba(160, 235, 255, 0.5);
+}
+.topbar .tline::before {
+  content: ''; position: absolute; left: 0; top: 0; width: 160px; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.95), transparent);
+  animation: tlineScan 4.8s linear infinite;
+  filter: blur(0.4px);
+  opacity: 0.9;
 }
 .topbar .tline::after {
-  content: ''; position: absolute; left: 0; right: 0; top: -6px; height: 6px;
-  background: linear-gradient(180deg, transparent, rgba(30, 110, 160, 0.18));
+  content: ''; position: absolute; left: 0; right: 0; top: -10px; height: 10px;
+  background: linear-gradient(180deg, transparent 0%, rgba(30, 110, 160, 0.14) 100%);
+  pointer-events: none;
 }
-.cornorn { position: absolute; top: 8px; width: 150px; height: 12px; }
-.cornorn.l { left: 12px; background: linear-gradient(90deg, rgba(90,205,255,.8), transparent); clip-path: polygon(0 0, 26% 0, 100% 100%, 0 100%); }
-.cornorn.r { right: 12px; background: linear-gradient(270deg, rgba(90,205,255,.8), transparent); clip-path: polygon(0 100%, 74% 0, 100% 0, 100% 100%); }
-.cwings { position: absolute; top: 14px; opacity: 0.85; }
-.cwings:first-of-type { left: 10px; }
-.cwings.flip { right: 10px; left: auto; transform: scaleX(-1); }
+@keyframes tlineScan {
+  0% { transform: translateX(-200px); opacity: 0; }
+  8% { opacity: 1; }
+  92% { opacity: 1; }
+  100% { transform: translateX(1920px); opacity: 0; }
+}
+.cornorn { position: absolute; top: 10px; width: 160px; height: 10px; opacity: 0.9; }
+.cornorn.l { left: 14px; background: linear-gradient(90deg, rgba(130,225,255,.9), rgba(90,205,255,.15) 70%, transparent); clip-path: polygon(0 0, 32% 0, 100% 100%, 0 100%); box-shadow: 0 0 8px rgba(90,205,255,0.3); }
+.cornorn.r { right: 14px; background: linear-gradient(270deg, rgba(130,225,255,.9), rgba(90,205,255,.15) 70%, transparent); clip-path: polygon(0 100%, 68% 0, 100% 0, 100% 100%); box-shadow: 0 0 8px rgba(90,205,255,0.3); }
+.cwings { position: absolute; top: 16px; opacity: 0.88; filter: drop-shadow(0 0 5px rgba(90,200,255,0.2)); }
+.cwings:first-of-type { left: 12px; }
+.cwings.flip { right: 12px; left: auto; transform: scaleX(-1); }
 
 /* ===== 列 ===== */
 .col {
-  position: absolute; top: 78px; bottom: 58px; width: 330px;
+  position: absolute; top: 86px; bottom: 58px; width: 330px;
   display: flex; flex-direction: column; gap: 12px;
   /* 外轮廓定高（拒绝列级滚动）：flex 消化屏幕高度差（16:10 舞台高随屏拉伸），
      信息滚动只发生在 .servos / .palarms 内区 */
@@ -303,18 +366,30 @@ button { font-family: inherit; }
 .evb-p { border-color: rgba(150, 235, 255, 0.55); color: #c4f1ff; }
 .evb-s { border-color: rgba(90, 150, 190, 0.4); color: #7fa9c4; }
 
-/* 顶栏扩展 */
+/* 顶栏扩展 · 高科技重塑 + 修复重叠（原 396px/400px 会与标题/横线挤压） */
 .topbar .subtitle {
-  position: absolute; left: 50%; top: 46px; transform: translateX(-50%);
-  font-size: 11px; letter-spacing: 0.4em; text-indent: 0.4em; color: #6f9cbb; white-space: nowrap;
+  position: absolute; left: 50%; top: 44px; transform: translateX(-50%);
+  font-size: 11px; letter-spacing: 0.38em; text-indent: 0.38em; color: #7fb8d8; white-space: nowrap;
+  opacity: 0.92; text-shadow: 0 0 8px rgba(90,200,255,0.25);
+  z-index: 2;
 }
 .topbar .wallclock {
-  position: absolute; left: 396px; top: 24px; font-family: var(--font-mono); font-size: 11.5px;
-  letter-spacing: 0.08em; color: #79a9c8;
+  position: absolute; left: 22px; top: 16px; z-index: 3;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: #8cc6e2;
+  padding: 5px 12px;
+  background: linear-gradient(135deg, rgba(16, 42, 68, 0.65), rgba(8, 24, 40, 0.5));
+  border: 1px solid rgba(110, 200, 245, 0.22);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.3), 0 0 10px rgba(0,120,200,0.12), inset 0 1px 0 rgba(160,230,255,0.12);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
 }
 .topbar .quality {
-  position: absolute; right: 400px; top: 20px; display: flex; align-items: center; gap: 6px;
-  font-size: 10.5px; letter-spacing: 0.2em; color: #6f9cbb;
+  position: absolute; right: 22px; top: 16px; z-index: 3;
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10.5px; letter-spacing: 0.16em; color: #7aa3be;
+  padding: 5px 10px;
+  background: linear-gradient(135deg, rgba(16, 42, 68, 0.55), rgba(8, 24, 40, 0.4));
+  border: 1px solid rgba(110, 200, 245, 0.18);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.25), inset 0 1px 0 rgba(160,230,255,0.1);
 }
 .topbar .quality button {
   width: 26px; height: 20px; cursor: pointer; color: #9fd8f2;

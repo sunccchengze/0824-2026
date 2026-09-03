@@ -27,13 +27,43 @@ import {
 
 const D2R = THREE.MathUtils.degToRad
 const HOLO_PURE = new THREE.Color(1.0, 1.0, 1.0)
-// 选中态金色（任务#9）：线稿/光晕/肋线/地环一体换色；告警红语义优先不受影响
 const GOLD_CORE = new THREE.Color(1.0, 0.875, 0.62)
 const GOLD_HALO = new THREE.Color(1.0, 0.78, 0.4)
 const GOLD_RIB = new THREE.Color(1.0, 0.875, 0.615)
 const HOLO_GLOW = new THREE.Color(0.82, 0.97, 1.0)
 export const ALARM_RED = new THREE.Color('#ff5f6b')
 export const DIM_BLUE = new THREE.Color('#3d5a74')
+
+// —— 信标光斑纹理：中心亮、边缘羽化（用户反馈：之前样式奇怪，应有光斑感）——
+function makeBeaconTexture(): THREE.CanvasTexture {
+  const S = 128
+  const c = document.createElement('canvas')
+  c.width = S
+  c.height = S
+  const ctx = c.getContext('2d')!
+  const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2)
+  // 中心极亮白 → 内层青白 → 中层青 → 外层淡透明 → 边缘完全透明
+  g.addColorStop(0, 'rgba(255,255,255,1)')
+  g.addColorStop(0.12, 'rgba(220,245,255,0.95)')
+  g.addColorStop(0.22, 'rgba(150,230,255,0.55)')
+  g.addColorStop(0.36, 'rgba(80,190,235,0.22)')
+  g.addColorStop(0.52, 'rgba(40,120,180,0.08)')
+  g.addColorStop(0.72, 'rgba(20,60,120,0.02)')
+  g.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, S, S)
+  const tex = new THREE.CanvasTexture(c)
+  tex.colorSpace = THREE.NoColorSpace
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  return tex
+}
+let sharedBeaconTex: THREE.CanvasTexture | null = null
+function getBeaconTexture(): THREE.CanvasTexture | null {
+  if (typeof document === 'undefined') return null
+  if (!sharedBeaconTex) sharedBeaconTex = makeBeaconTexture()
+  return sharedBeaconTex
+}
 
 // ---------------------------------------------------------------------------
 // 材质
@@ -358,57 +388,95 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
   const spin = useRef<THREE.Group>(null!)
   const beaconMat = useRef<THREE.MeshBasicMaterial>(null!)
   const beaconLight = useRef<THREE.PointLight>(null!)
-  const beaconHalo = useRef<THREE.Mesh>(null!)
+  const beaconHalo = useRef<THREE.Sprite>(null!)
+  const beaconOuter = useRef<THREE.Sprite>(null!)
   const ringMat = useRef<THREE.MeshBasicMaterial>(null!)
   const spinRef = useRef(0)
 
   const assets = useMemo(() => {
     const merged = buildMerged()
+    const bTex = getBeaconTexture()
+    const haloMat = new THREE.SpriteMaterial({
+      map: bTex ?? undefined,
+      color: HOLO_GLOW,
+      transparent: true,
+      opacity: 0.52,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    })
+    const outerMat = new THREE.SpriteMaterial({
+      map: bTex ?? undefined,
+      color: HOLO_GLOW,
+      transparent: true,
+      opacity: 0.18,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    })
     return {
       merged,
       shell: makeShellMaterial(),
       core: makeCoreLineMaterial(),
       halo: makeHaloLineMaterial(),
       rib: makeRibMaterial(),
+      beaconHaloMat: haloMat,
+      beaconOuterMat: outerMat,
     }
   }, [])
 
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime
     assets.shell.uniforms.uTime.value = t
-    // 选中=金色系 / 未选中=纯白（每帧幂等，避免 effect/loop 打架）
     assets.core.color.copy(selected ? GOLD_CORE : HOLO_PURE)
     assets.halo.color.copy(selected ? GOLD_HALO : HOLO_GLOW)
     assets.rib.color.copy(selected ? GOLD_RIB : HOLO_PURE)
     ;(assets.shell.uniforms.uTint.value as THREE.Vector3).set(selected ? 1.5 : 1, selected ? 1.06 : 1, selected ? 0.42 : 1)
-    // 夜间生机：航空障碍灯夜间增强 + 点光源 + 光晕缩放
+    // 信标光斑：中心亮、边缘羽化（修复之前“奇怪”样式）
     const dayF = skyState.dayF
     const night = 1 - dayF
-    const pulse = Math.pow(0.5 + 0.5 * Math.sin(t * 2.1 + idx * 1.7), 3) // 慢闪，0.33Hz，错相
+    const pulse = Math.pow(0.5 + 0.5 * Math.sin(t * 2.1 + idx * 1.7), 3)
     const slowPulse = 0.5 + 0.5 * Math.sin(t * 0.7 + idx * 0.9)
     if (beaconMat.current) {
-      // 白天：0.3+0.7*pow 维持原有；夜晚：基底 0.55 + 脉冲 0.95，且整体更亮
       const base = 0.3 + 0.7 * Math.pow(0.5 + 0.5 * Math.sin(t * 3.2 + idx * 1.7), 3)
       beaconMat.current.opacity = base * (0.55 + 0.95 * night) + night * 0.35 * pulse
     }
     if (beaconLight.current) {
-      // 点光：仅夜间有效，白天强度≈0，夜间随脉冲呼吸，照亮机舱顶部与近地
-      // 增强：强度 8-22，距离更大，让地面也能被微微照亮
       beaconLight.current.intensity = night * (8 + 14 * pulse) * (0.6 + 0.4 * slowPulse)
       beaconLight.current.distance = 140 + 60 * pulse
-      // 颜色：正常白，告警时转红（与能量环同口径）
       const u = getFarmFrame()?.units[idx]
-      if (u?.status === 'alarm') {
-        beaconLight.current.color.copy(ALARM_RED)
-      } else {
-        beaconLight.current.color.copy(HOLO_GLOW)
+      if (u?.status === 'alarm') beaconLight.current.color.copy(ALARM_RED)
+      else if (selected) beaconLight.current.color.copy(GOLD_HALO)
+      else beaconLight.current.color.copy(HOLO_GLOW)
+    }
+    // 光斑精灵：中心亮边缘羽化，呼吸缩放，夜间更明显
+    if (beaconHalo.current) {
+      const s = 6.5 + night * (3.2 + 2.4 * pulse) + pulse * 1.2
+      beaconHalo.current.scale.set(s, s, 1)
+      const mat = beaconHalo.current.material as THREE.SpriteMaterial
+      if (mat) {
+        mat.opacity = (0.38 + 0.52 * pulse) * (0.42 + 0.58 * night)
+        const u = getFarmFrame()?.units[idx]
+        if (u?.status === 'alarm') mat.color.copy(ALARM_RED)
+        else if (selected) mat.color.copy(GOLD_HALO)
+        else mat.color.copy(HOLO_GLOW)
       }
     }
-    if (beaconHalo.current) {
-      const s = 1.2 + night * (1.1 + 0.9 * pulse)
-      beaconHalo.current.scale.setScalar(s)
-      const mat = beaconHalo.current.material as THREE.MeshBasicMaterial
-      if (mat) mat.opacity = (0.32 + 0.48 * pulse) * (0.35 + 0.65 * night)
+    if (beaconOuter.current) {
+      const s = 14 + night * (6 + 4 * pulse) + slowPulse * 2
+      beaconOuter.current.scale.set(s, s, 1)
+      const mat = beaconOuter.current.material as THREE.SpriteMaterial
+      if (mat) {
+        mat.opacity = (0.12 + 0.18 * pulse) * (0.35 + 0.65 * night)
+        const u = getFarmFrame()?.units[idx]
+        if (u?.status === 'alarm') mat.color.copy(ALARM_RED)
+        else if (selected) mat.color.copy(GOLD_HALO)
+        else mat.color.copy(HOLO_GLOW)
+      }
     }
     const u = getFarmFrame()?.units[idx]
     if (!u) return
@@ -479,20 +547,19 @@ export default function HoloTurbine({ idx, x, z, y, servo }: {
         <lineSegments geometry={assets.merged.yawHalo} material={assets.halo} renderOrder={3} />
         <lineSegments geometry={assets.merged.yawCore} material={assets.core} renderOrder={4} />
         <group position={[0, S.hubY + 3.9, S.nacelleZ - 0.2]}>
+          {/* 核心：小而极亮，白天也可见 */}
           <mesh>
-            <sphereGeometry args={[0.7, 12, 12]} />
-            <meshBasicMaterial ref={beaconMat} color={HOLO_GLOW} transparent opacity={0.85} depthWrite={false} depthTest={false} fog={false} toneMapped={false} />
+            <sphereGeometry args={[0.55, 12, 12]} />
+            <meshBasicMaterial ref={beaconMat} color={HOLO_GLOW} transparent opacity={0.92} depthWrite={false} depthTest={false} fog={false} toneMapped={false} blending={THREE.AdditiveBlending} />
           </mesh>
-          {/* 夜航信标光晕（仅夜间明显，呼吸缩放）- 加大 */}
-          <mesh ref={beaconHalo as never} renderOrder={12}>
-            <sphereGeometry args={[2.6, 14, 14]} />
-            <meshBasicMaterial color={HOLO_GLOW} transparent opacity={0.32} depthWrite={false} depthTest={false} fog={false} toneMapped={false} blending={THREE.AdditiveBlending} />
-          </mesh>
-          {/* 第二层更大更柔的光晕 */}
-          <mesh renderOrder={12} scale={[2.2, 2.2, 2.2]}>
-            <sphereGeometry args={[2.6, 14, 14]} />
-            <meshBasicMaterial color={HOLO_GLOW} transparent opacity={0.12} depthWrite={false} depthTest={false} fog={false} toneMapped={false} blending={THREE.AdditiveBlending} />
-          </mesh>
+          {/* 光斑主体：中心亮、边缘羽化透明（精灵，始终面向相机） */}
+          <sprite ref={beaconHalo as never} position={[0, 0.15, 0]} scale={[7, 7, 1]} renderOrder={12}>
+            <primitive object={assets.beaconHaloMat} attach="material" />
+          </sprite>
+          {/* 外层柔光：更大更淡 */}
+          <sprite ref={beaconOuter as never} position={[0, 0.15, 0]} scale={[15, 15, 1]} renderOrder={11}>
+            <primitive object={assets.beaconOuterMat} attach="material" />
+          </sprite>
           <pointLight ref={beaconLight as never} intensity={0} distance={180} decay={2} color={HOLO_GLOW} />
         </group>
         <group position={[0, S.hubY, S.nacelleZ]} rotation={[-D2R(S.tiltDeg), 0, 0]}>
