@@ -104,6 +104,7 @@ export default function App() {
               requestAnimationFrame(warm)
               if (debugEnabled()) {
                 ;(window as unknown as Record<string, unknown>).__aeolus_cam = camera
+                ;(window as unknown as Record<string, unknown>).__aeolus_scene = scene
                 ;(window as unknown as Record<string, unknown>).__aeolus_stats = () => {
                   // 手动单帧渲染计数（EffectComposer 存在时 gl.info 只反映后期 pass）
                   const prevTone = gl.toneMapping
