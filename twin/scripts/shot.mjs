@@ -1,7 +1,13 @@
 // 无头截图工具：puppeteer-core + @sparticuz/chromium（沙箱可用的离线 Chromium）
 // 用法: node scripts/shot.mjs <url> <out.png> [waitMs] [w] [h]
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 import puppeteer from 'puppeteer-core'
 import chromium from '@sparticuz/chromium'
+
+// 沙箱内 NSS/NSPR 库：优先仓库内持久副本（twin/nsslibs），回退 /tmp/nsslibs
+const here = path.dirname(fileURLToPath(import.meta.url))
+const repoLibs = path.join(here, '..', 'nsslibs')
 
 const url = process.argv[2] || 'http://127.0.0.1:5173/'
 const out = process.argv[3] || 'shot.png'
@@ -11,7 +17,7 @@ const h = Number(process.argv[6] || 1080)
 
 const browser = await puppeteer.launch({
   executablePath: await chromium.executablePath(),
-  env: { ...process.env, LD_LIBRARY_PATH: '/tmp/nsslibs' },
+  env: { ...process.env, LD_LIBRARY_PATH: repoLibs + ':/tmp/nsslibs' },
   args: [...chromium.args, '--no-sandbox', '--disable-gpu-sandbox', '--enable-unsafe-swiftshader'],
   defaultViewport: { width: w, height: h, deviceScaleFactor: 1 },
   headless: 'shell',

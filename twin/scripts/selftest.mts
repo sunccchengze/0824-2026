@@ -7,7 +7,7 @@ import {
   farmFrame, optimizeYaw, windAt, FARM_RATED_MW,
 } from '../src/data/farmSim.ts'
 import { powerCurveKw, yawFactor, wakeDeficit, TILT_F, wakeDeflection } from '../src/data/turbinePhysics.ts'
-import { FARM, SUBSTATION, terrainHeight, terrainSurfaceY } from '../src/scene/terrainUtil.ts'
+import { FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY } from '../src/scene/terrainUtil.ts'
 
 let pass = 0
 let fail = 0
@@ -218,16 +218,28 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
   }
   // 修复前机位处最大差 7.34m（T06），风机基座环仅离地 0.9m → 环悬空
   ok('V&V 贴地基准唯一：terrainSurfaceY ≡ 静态渲染面', mx < 1e-9, `最大差=${mx.toExponential(2)} m`)
-  // 且必须真的不等于原始 terrainHeight（否则说明改错成恒等函数）
-  let diff = 0
-  for (const u of FARM) diff = Math.max(diff, Math.abs(terrainSurfaceY(u.x, u.z) - terrainHeight(u.x, u.z)))
-  ok('V&V terrainSurfaceY 确实带台地/碎化加工（非恒等）', diff > 1, `机位最大偏移=${diff.toFixed(2)} m`)
 
-  // 第 26 轮补充：连续面 + 波浪位移是「运行时顶点着色器」副作用，静态几何应仍
-  // 严格等于 terrainSurfaceY（波幅只在 shader 里对水面顶点叠加，不影响贴地基准）。
+  // 第 29/30 轮：新地形为「海洋」——terrainSurfaceY 连续海床（≈海平面级低矮），
+  // 与 terrainHeight 同源；海岸带陡升至数十米，保证「陆地明显高于海面」。
+  let seaOK = true, coastOK = true
+  for (const u of FARM) {
+    const sy = terrainSurfaceY(u.x, u.z)
+    if (sy > 12) seaOK = false // 风机区是海床，应接近海平面
+  }
+  // 海岸在离场心 1825m 处抬升到 ≥12m，内陆更高
+  for (const ang of [0, 90, 180, 270]) {
+    const dx = Math.sin((ang * Math.PI) / 180), dz = Math.cos((ang * Math.PI) / 180)
+    const h = terrainHeight(FARM_CENTER.x + dx * 2300, FARM_CENTER.z + dz * 2300)
+    if (h < 30) coastOK = false
+  }
+  ok('V&V 风机区为海床：机位 terrainSurfaceY ≤ 12m（贴海）', seaOK, '机位贴海基准')
+  ok('V&V 海岸明显高于海面：内陆 2300m 处 ≥30m', coastOK, '海陆交界抬升')
+
+  // 第 26/29 轮：波浪位移是「运行时顶点着色器」副作用，静态几何应仍严格等于
+  // terrainSurfaceY（波幅只在 shader 里对水面顶点叠加，不影响贴地基准）。
   let waveOK = true
-  for (const u of FARM) if (Math.abs(terrainSurfaceY(u.x, u.z) - terrainHeight(u.x, u.z)) < 0.5) waveOK = false
-  ok('V&V 波浪位移不污染贴地基准（静态几何=terrainSurfaceY）', waveOK, '机位贴地基准与地形加工可区分')
+  for (const u of FARM) if (Math.abs(terrainSurfaceY(u.x, u.z) - terrainHeight(u.x, u.z)) > 1e-9) waveOK = false
+  ok('V&V 波浪位移不污染贴地基准（静态几何=terrainSurfaceY）', waveOK, '机位贴地基准与地形同源')
 }
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)

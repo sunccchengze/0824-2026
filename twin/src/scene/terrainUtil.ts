@@ -42,58 +42,38 @@ const smoothstep = (e0: number, e1: number, x: number) => {
   return t * t * (3 - 2 * t)
 }
 
-// ---- 地形：暗海式场区（近似海面微起伏）+ 西北群山剪影（地平线带）----
+// ---- 地形：海上风电场（大盆地海床 + 四周明显抬升的海岸山脉）----
+// 第 29/30 轮重构（用户验收回访）：
+//  · 海盆半径大幅扩大，全部 9 机与升压站均位于海中央，距海岸遥远；
+//  · 海岸带陡升（陆地明显高于海平面），不再是 50-80m 的糊过渡；
+//  · 海床只保留极低幅微地貌（±2m），贴地稳定、贴近真实海平台。
+/** 海上风电场中心（海盆圆心；与场景布局场心一致） */
+export const FARM_CENTER = { x: -100, z: -640 } as const
+
 /**
- * 地面【实际渲染面】高度（第 20 轮修复）。
- *
- * 病因：WorldTerrain 画地面时对 terrainHeight 做了三重加工——
- *   base = h*0.58 + round(h/26)*26*0.42        （台地量化）
- *   + 逐面 hash 抬沉 (hash2-0.5)*6.4           （晶面碎化）
- * 而风机/升压站/电缆/星光都直接用原始 terrainHeight 定位。
- * 实测二者在 9 台机位处最大差 7.34 m（T06），升压站差 3.31 m。
- * 风机基座能量环只离地 0.9~1.9 m，于是环被甩到空中 —— 用户看到的
- * “乱飘的小圆环”。
- *
- * 修复：把这套加工抽成唯一函数，地面与所有贴地物体都调它。
- * 注意不含波浪位移（那是顶点着色器里的时变项，逐帧起伏，
- * 贴地物体跟随它反而会抖；波浪振幅在场区已按距离收敛）。
- */
-/**
- * 地面连续化（用户诉求：完整连续表面，非碎三角）。
- * 旧版：h*0.58+terrace*0.42 + 逐面 hash 抬沉 (hash-0.5)*6.4 → 每三角面独立高度，
- * 导致视觉上碎裂。为连续化，去掉 per-face lift，保留台地量化与基础地形，
- * 仅叠加极小连续噪声（<0.6m）避免完全平板。
+ * 地面【实际渲染面】高度（第 30 轮重构）。
+ * 直接等于连续地形 terrainHeight（连续海床，无台地量化台阶）。
+ * 贴地基准与渲染面同源 —— 风机/升压站/电缆/星光全部贴它定位，零回归。
  */
 export function terrainSurfaceY(x: number, z: number): number {
-  const h = terrainHeight(x, z)
-  const terrace = Math.round(h / 26) * 26
-  // 极小连续起伏，基于低频 fbm，避免碎裂
-  const micro = N.fbm(x * 0.012 + 1.7, z * 0.012 - 2.3, 2) * 0.6
-  return h * 0.58 + terrace * 0.42 + micro
+  return terrainHeight(x, z)
 }
 
 export function terrainHeight(x: number, z: number): number {
-  // 三层尺度：远景山脊、场区缓坡、近景碎石起伏。远处不再是一块平板，
-  // 但机组基础附近仍保留可施工的缓坡，保证风机、电缆和升压站自然贴地。
-  let h = N.ridged(x * 0.00042, z * 0.00042) * 72
-    + N.fbm(x * 0.00088, z * 0.00088) * 30
-    + N.fbm(x * 0.0048, z * 0.0048) * 4.0
-    - 38
-  // 中央风场轻压平：保留 10% 的大尺度地形起伏，不做完全水平的“海面”。
-  const dF = Math.hypot(x / 1.06, (z + 320) / 0.94)
-  const fieldFlatten = 1 - 0.78 * smoothstep(1060, 360, dF)
-  h *= fieldFlatten
-  // 场区外叠加低频宏观山脊；从风场向远处逐渐增强，形成真实纵深。
-  const macro = (N.fbm(x * 0.00072 + 4.1, z * 0.00072 - 2.7, 5) - 0.46) * 130
-  h += macro * (0.10 + 0.90 * smoothstep(360, 1250, dF))
+  // 到场心（海盆圆心）距离
+  const d = Math.hypot(x - FARM_CENTER.x, z - FARM_CENTER.z)
+  // 海床基准（低，贴近真实海平台）+ 极低幅微地貌（不是完全平面）
+  const bed = (N.fbm(x * 0.0009, z * 0.0009, 3) - 0.5) * 4.0
+  let h = 2.0 + bed
+  // 海岸陡坡：d 从海缘(1750m)快速抬升到岸顶(~80m)，陆地明显高过海面
+  const coast = smoothstep(1750, 2060, d)
+  h += coast * 82
+  // 内陆远山（地平线剪影带）：更远处更高，带噪声起伏
+  const mtn = smoothstep(2150, 3200, d)
+  h += mtn * (95 + 175 * N.ridged(x * 0.00042 + 3.1, z * 0.00042 - 1.4, 4))
   // 升压站局地再压平
   const dS = Math.hypot(x - SUBSTATION.x, z - SUBSTATION.z)
-  h *= 1 - 0.92 * smoothstep(300, 130, dS)
-  // 西北远山（地平线剪影带，画面左/上）：加强层次，但保持原冰青暗色。
-  h += 235 * smoothstep(-650, -2400, z) * (0.34 + 0.66 * N.fbm(x * 0.00055, 7.7, 4))
-  h += 180 * smoothstep(-900, -2200, x) * (0.44 + 0.56 * N.fbm(z * 0.00064, 3.3, 4))
-  // 东侧远丘（右缘低剪影）
-  h += 105 * smoothstep(1050, 2500, x) * (0.36 + 0.64 * N.fbm(z * 0.00066, 13.1, 4))
+  h *= 1 - 0.9 * smoothstep(300, 130, dS)
   return h
 }
 
