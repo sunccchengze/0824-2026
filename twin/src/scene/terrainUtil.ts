@@ -143,9 +143,9 @@ export const HEADLANDS: CoastFeature[] = [
 /** 主峰（直插云霄）+ 次峰：深陆无人区，只做视觉奇观，不触碰任何约束 */
 export interface Peak { x: number; z: number; r: number; h: number }
 export const PEAKS: Peak[] = [
-  { x: -2700, z: -3900, r: 600, h: 900 }, // 主峰（56° 陡壁窄脊，合计 1200m 级）
-  { x: -1600, z: -4200, r: 450, h: 550 }, // 次峰（群峰呼应）
-]
+  { x: -2700, z: -3900, r: 800, h: 780 }, // 主峰（round11：r600→800、h900→780，
+  { x: -1600, z: -4200, r: 600, h: 470 }, // 次峰（同上）—— 宽肩缓脊，合计仍 1000m 级，
+]                                         // 不再是“插在地上”的针，只做体量不做高度竞赛
 /** 丘陵盆地：台地带平滑洼陷（纯视觉起伏，深陆内部） */
 export interface Basin { x: number; z: number; r: number; depth: number }
 export const BASINS: Basin[] = [
@@ -297,12 +297,14 @@ export function terrainHeight(x: number, z: number): number {
       if (db < b.r) h -= b.depth * (1 - smoothstep(0, b.r, db))
     }
   }
-  for (const pk of PEAKS) { // 主峰/次峰（近直线锥整面陡壁 + 冰川沟壑，直插云霄）
+  for (const pk of PEAKS) { // 主峰/次峰（round11：宽肩缓脊 + 基座裙边，坐进山脊）
     const dp = Math.hypot(x - pk.x, z - pk.z)
-    if (dp < pk.r) {
+    if (dp < pk.r * 2.6) {
       const prof = 1 - smoothstep(0, pk.r, dp)
       const gully = (N.ridged(x * 0.006 + pk.x * 0.01, z * 0.006 - pk.z * 0.01, 3) - 0.5) * 2
-      h += pk.h * prof ** 1.15 + pk.h * 0.20 * gully * prof
+      h += pk.h * prof ** 1.05 + pk.h * 0.14 * gully * prof
+      // 裙边：峰脚向外 1.2r 处垫高 0.32h、2.6r 处归零 —— 峰从山脊里“长出来”，不断层
+      h += pk.h * 0.32 * smoothstep(pk.r * 0.3, pk.r * 1.2, dp) * (1 - smoothstep(pk.r * 1.2, pk.r * 2.6, dp))
     }
   }
   // 离岸岛/海岬（第 32 轮）：不规则轮廓锥形抬升（中心全高 → rr+180m 处归零），
