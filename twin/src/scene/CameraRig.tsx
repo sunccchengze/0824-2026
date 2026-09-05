@@ -2,7 +2,9 @@
 import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
-import { CAM, FARM } from './terrainUtil'
+import {
+  CAM, FARM, FARM_CENTER,
+} from './terrainUtil'
 import { useSim } from '../state/simStore'
 import {
   CAMERA_PATH, LOOK_PATH, INTRO_END,
@@ -19,10 +21,63 @@ import {
 //  · WASD 自由飞行支持。
 // ============================================================================
 
-const CAM_BOOKMARKS = [
-  { pos: new THREE.Vector3(60, 430, 990), target: new THREE.Vector3(0, 22, -340) },
-  { pos: new THREE.Vector3(FARM[6].x + 170, 150, FARM[6].z + 250), target: new THREE.Vector3(FARM[6].x, 74, FARM[6].z) },
-  { pos: new THREE.Vector3(-340, 250, 760), target: new THREE.Vector3(300, 20, 300) },
+// 九个塔位快速镜头（数字键 1-9）：复用书签平滑过渡（1.2s ease），视觉风格与现有书签一致。
+// 坐标系约定：+x=东，+z=南，场心 FARM_CENTER=(-100,-640)；塔位 target=轮毂中心 (x, HUB, z)。
+// “前” = 塔位看向场心的方向（normalize(C - P)）；“右/左” = 前向量绕上向量 ±90°。
+const HUB_Y = 90 // 轮毂高（与 terrainUtil.ANCHOR.HUB 一致）
+
+function towerForward(i: number): [number, number, number] {
+  const u = FARM[i]
+  const f = new THREE.Vector3(FARM_CENTER.x - u.x, 0, FARM_CENTER.z - u.z).normalize()
+  return [ f.x, f.y, f.z ]
+}
+
+// towerForward(i) 返回的前向量随塔位变化；此处复用同一前向量求右向量。
+// 调用约定：先调用 towerForward(i) 拿前向量，再以同一 i 调用 towerRight 求右向量。
+function towerRight(fx: number, fz: number): [number, number, number] {
+  const r = new THREE.Vector3(fx, 0, fz).cross(new THREE.Vector3(0, 1, 0)).normalize()
+  return [ r.x, r.y, r.z ]
+}
+
+function hotPos(
+  i: number,
+  along: number,   // 前向量方向上的偏移（正=朝场心方向）
+  aside: number,   // 右向量方向上的偏移（正=右）
+  height: number,  // 相机海拔（绝对）
+): THREE.Vector3 {
+  const u = FARM[i]
+  const [ fx, , fz ] = towerForward(i)
+  const [ rx, , rz ] = towerRight(fx, fz)
+  return new THREE.Vector3(
+    u.x + fx * along + rx * aside,
+    height,
+    u.z + fz * along + rz * aside,
+  )
+}
+
+// 视角设计（单位：米）：
+// · 高处俯拍（1/2/3）：轮毂上空 260m，距塔 ~360m，形成俯视全机组+塔的构图
+// · 平视近/中/远（4/5/6）：轮毂高度 ±20m，距塔 90/170/320m
+// · 低处仰拍（7/8/9）：海平面 +8m，距塔 80/110/90m，形成仰角打向轮毂
+const CAM_HOTKEYS = [
+  // 1: T01 右前方高处俯拍
+  { pos: hotPos(0,  360,  160, HUB_Y + 260), target: new THREE.Vector3(FARM[0].x, HUB_Y, FARM[0].z) },
+  // 2: T02 正前方高处俯拍
+  { pos: hotPos(1,  380,    0, HUB_Y + 270), target: new THREE.Vector3(FARM[1].x, HUB_Y, FARM[1].z) },
+  // 3: T03 左前方高处俯拍
+  { pos: hotPos(2,  360, -160, HUB_Y + 260), target: new THREE.Vector3(FARM[2].x, HUB_Y, FARM[2].z) },
+  // 4: T04 右前方近距离平视
+  { pos: hotPos(3,   90,   50, HUB_Y + 18),  target: new THREE.Vector3(FARM[3].x, HUB_Y, FARM[3].z) },
+  // 5: T05 正前方中距离平视
+  { pos: hotPos(4,  170,    0, HUB_Y + 22),  target: new THREE.Vector3(FARM[4].x, HUB_Y, FARM[4].z) },
+  // 6: T06 左前方远距离平视
+  { pos: hotPos(5,  320, -120, HUB_Y + 20),  target: new THREE.Vector3(FARM[5].x, HUB_Y, FARM[5].z) },
+  // 7: T07 右前方低处仰拍
+  { pos: hotPos(6,   70,   45, 8),           target: new THREE.Vector3(FARM[6].x, HUB_Y, FARM[6].z) },
+  // 8: T08 中前方低处仰拍
+  { pos: hotPos(7,  100,    0, 8),           target: new THREE.Vector3(FARM[7].x, HUB_Y, FARM[7].z) },
+  // 9: T09 左前方低处仰拍
+  { pos: hotPos(8,   80,  -48, 8),           target: new THREE.Vector3(FARM[8].x, HUB_Y, FARM[8].z) },
 ] as const
 
 const ORBIT_DUR = 9
@@ -131,8 +186,8 @@ export default function CameraRig() {
         if (!s.introDone) s.skipIntro()
       }
       const n = Number(e.key)
-      if (n >= 1 && n <= CAM_BOOKMARKS.length) {
-        const b = CAM_BOOKMARKS[n - 1]
+      if (n >= 1 && n <= CAM_HOTKEYS.length) {
+        const b = CAM_HOTKEYS[n - 1]
         const p = camera.position.clone()
         const ctl = controlsRef.current
         bookmark.current = {
