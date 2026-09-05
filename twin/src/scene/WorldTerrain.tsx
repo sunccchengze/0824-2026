@@ -307,23 +307,24 @@ void main() {
     vec3 sunCol = mix(vec3(0.11, 0.26, 0.38), vec3(0.80, 0.80, 0.78), uDayF);
     waterCol += sunCol * spec * (uDayF * 0.9 + night * 0.16);
 
-    // 波峰泡沫（细碎稀疏）
+    // 波峰泡沫（细碎稀疏）—— 上限收紧 0.26→0.10 避免与岸线 foam 叠加爆白
     float foamNoise = fbm(vWPos.xz * 0.075 + uTime * 0.06 + crest * 3.0);
     float foamMask = smoothstep(0.66, 0.98, crest) * (0.10 + 0.60 * smoothstep(0.58, 0.86, foamNoise));
     vec3 foam = mix(vec3(0.028, 0.06, 0.09), vec3(0.50, 0.63, 0.68), uDayF);
-    waterCol = mix(waterCol, foam, foamMask * (0.08 + uDayF * 0.18));
+    waterCol = mix(waterCol, foam, foamMask * (0.04 + uDayF * 0.06));
 
-    // 岸线碎浪带（沿水际线，随浪打碎）
-    float shB = smoothstep(-26.0, 1.0, vShore) * (1.0 - smoothstep(1.0, 46.0, vShore));
+    // 岸线碎浪带（沿水际线，随浪打碎）—— 收窄 0.65→0.18，仅 -8..+18m
+    float shB = smoothstep(-8.0, 1.0, vShore) * (1.0 - smoothstep(1.0, 18.0, vShore));
     float shN = vnoise(vWPos.xz * 0.09 + uTime * 0.22);
-    waterCol = mix(waterCol, foam, shB * smoothstep(0.55, 0.95, shN) * (0.25 + 0.4 * uDayF));
+    waterCol = mix(waterCol, foam, shB * smoothstep(0.55, 0.95, shN) * (0.08 + 0.10 * uDayF));
 
     // R32 · 岸线泡沫带（沿 landMask=0.5 等值面 ±3.2m 滚动白沫，友资产做法）
-    float shoreF = 1.0 - smoothstep(0.0, 3.2, abs(vCoastDist));
+    // —— 上限 0.80→0.30，只在 ±2m 内出现，不再与上面两层叠加爆白
+    float shoreF = 1.0 - smoothstep(0.0, 2.0, abs(vCoastDist));
     float band = sin(abs(vCoastDist) * 2.4 - uTime * 1.6 + vnoise(vWPos.xz * 0.10) * 3.0) * 0.5 + 0.5;
     float shoreFoam = shoreF * smoothstep(0.42, 0.62, vnoise(vWPos.xz * 0.18) * 0.55 + band * 0.35);
     vec3 shoreFoamCol = mix(vec3(0.65, 0.75, 0.80), vec3(0.88, 0.92, 0.96), uDayF);
-    waterCol = mix(waterCol, shoreFoamCol, shoreFoam * (0.32 + 0.48 * uDayF));
+    waterCol = mix(waterCol, shoreFoamCol, shoreFoam * (0.12 + 0.18 * uDayF));
 
     // ===== R35 镜面修复：太阳/月亮各自走自己的 halfV，绝不能共用 =====
     // 太阳的锐镜面（已用 halfV 算完）
