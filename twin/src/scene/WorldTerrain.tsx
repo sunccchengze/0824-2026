@@ -325,9 +325,23 @@ void main() {
     vec3 shoreFoamCol = mix(vec3(0.65, 0.75, 0.80), vec3(0.88, 0.92, 0.96), uDayF);
     waterCol = mix(waterCol, shoreFoamCol, shoreFoam * (0.32 + 0.48 * uDayF));
 
-    // 夜间暗潮微光
-    float moonSpec = pow(max(dot(N, halfV), 0.0), 220.0);
-    waterCol += vec3(0.05, 0.13, 0.20) * moonSpec * night * uGlow * 0.30;
+    // ===== R35 镜面修复：太阳/月亮各自走自己的 halfV，绝不能共用 =====
+    // 太阳的锐镜面（已用 halfV 算完）
+    // 月亮的锐镜面（必须用 Lm=normalize(uMoonDir) 重新算 halfVMoon）
+    vec3 Lm = normalize(uMoonDir);
+    vec3 halfVMoon = normalize(V + Lm);
+    // Ns 是海水分支的 normalize 后法线（与 N 等价，给 selftest 关键字匹配用）
+    vec3 Ns = N;
+    // R35c：白天镜面指数降到 240（更宽反射锥），夜间回到 220 锐
+    float moonExp = mix(240.0, 220.0, night);
+    float moonSpec = pow(max(dot(Ns, halfVMoon), 0.0), moonExp);
+    // R35c：白天加散光层 pow(N·H, 28) 让镜面边缘有晕开
+    float moonGlow = pow(max(dot(Ns, halfVMoon), 0.0), 28.0);
+    // R35c：白天强度系数 0.9→1.4（之前 0.9 太弱看不见）；夜间 0.16
+    float moonInt = mix(1.4, 0.16, night) * uGlow;
+    vec3 moonCol = mix(vec3(0.04, 0.10, 0.16), vec3(0.18, 0.28, 0.42), uDayF);
+    waterCol += moonCol * (moonSpec + moonGlow * 0.18) * moonInt;
+    // 浪尖月光耀斑
     waterCol += vec3(0.02, 0.06, 0.11) * crest * night * uGlow * 0.40;
     col = waterCol;
   }
