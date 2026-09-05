@@ -162,7 +162,7 @@ function buildSet(kind: 0 | 1, count: number, seed: number): GrassSet {
       uWind: { value: new THREE.Vector2(0.8, 0.6) },
       uDayF: { value: 1 },
       uFogColor: { value: new THREE.Color('#040911') },
-      uFogDensity: { value: 0.00022 },
+      uFogDensity: { value: 0.00013 }, // C4：默认值随 App 场景雾
     },
     side: THREE.DoubleSide,
   })

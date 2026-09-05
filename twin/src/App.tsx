@@ -84,7 +84,7 @@ export default function App() {
             onCreated={({ gl, scene, camera }) => {
               gl.toneMapping = THREE.ACESFilmicToneMapping
               gl.toneMappingExposure = 1.14
-              scene.fog = new THREE.FogExp2('#040911', 0.00022)
+              scene.fog = new THREE.FogExp2('#040911', 0.00013) // C4：0.00022→0.00013 —— 4500m峰从63%雾洗降到25%，去“大雾”，留空气感
               const canvas = gl.domElement
               canvas.addEventListener('webglcontextlost', (e) => {
                 e.preventDefault()

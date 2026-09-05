@@ -441,7 +441,7 @@ export default function WorldTerrain() {
       uGlow: { value: 1 },
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uFogColor: { value: new THREE.Color('#040911') },
-      uFogDensity: { value: 0.00022 },
+      uFogDensity: { value: 0.00013 }, // C4：默认值随 App 场景雾（逐帧覆盖，此处仅首帧）
       uHeightTex: { value: htex },
       uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
     }
