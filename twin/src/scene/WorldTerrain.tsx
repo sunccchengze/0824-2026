@@ -115,6 +115,7 @@ uniform float uGlow;
 uniform vec3 uSunDir;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
+uniform vec2 uWind; // Step B：泡沫顺风拉丝用风向（uniforms 本就有，FRAG 补声明）
 
 float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
 float vnoise(vec2 p){
@@ -172,6 +173,10 @@ void main() {
   // 浪尖层次：片元内用解析波高现算（摆脱顶点网格 → 消除条带/格子感）
   float wh = waveHeight(vWPos.xz);
   float crest = smoothstep(0.25, 0.85, wh); // 归一化波高 → 0..1 浪尖
+  // Step B1：打散浪尖云斑 —— 高频 breakup 把正弦干涉的 200m+ 亮斑撕碎，
+  // 提亮不同步下调（0.55→0.42），海面不再“长癣”
+  float breakup = fbm(vWPos.xz * 0.020 + vec2(uTime * 0.05, -uTime * 0.03));
+  crest *= 0.45 + 0.55 * smoothstep(0.25, 0.75, breakup);
 
   // —— Fresnel 菲涅尔：贴水面反射天空；用「面朝上」gate 掉陡岸坡发白 ——
   float upness = smoothstep(0.36, 0.72, N.y);
@@ -181,7 +186,7 @@ void main() {
   // 参照用户原图：海底深青黑，浪尖点缀青白，整体暗、不刺眼。
   vec3 deepCol  = mix(vec3(0.008, 0.022, 0.038), vec3(0.050, 0.115, 0.185), uDayF); // 浪谷（深青黑）
   vec3 shallowCol = mix(vec3(0.024, 0.055, 0.082), vec3(0.150, 0.310, 0.420), uDayF); // 浪尖（低饱和青蓝）
-  vec3 waterCol = mix(deepCol, shallowCol, crest * 0.55);
+  vec3 waterCol = mix(deepCol, shallowCol, crest * 0.42);
 
   // 天空反射：低饱和灰青蓝（白天）→ 近黑（夜），权重压低避免整片洗灰
   vec3 skyRef = mix(vec3(0.014, 0.032, 0.054), vec3(0.150, 0.290, 0.385), uDayF);
@@ -195,11 +200,24 @@ void main() {
   vec3 sunCol = mix(vec3(0.11, 0.26, 0.38), vec3(0.80, 0.80, 0.78), uDayF);
   waterCol += sunCol * spec * (uDayF * 0.72 + night * 0.13);
 
-  // —— 波峰泡沫：只在 crest，且提频打散成细碎稀疏浪花（克制；避免大块云斑）——
-  float foamNoise = fbm(vWPos.xz * 0.16 + uTime * 0.06 + crest * 3.0);
-  float foamMask = smoothstep(0.72, 0.98, crest) * (0.10 + 0.60 * smoothstep(0.58, 0.86, foamNoise));
+  // —— 波峰泡沫（Step B2）：顺风拉丝 + 米级碎点 + 三重稀疏门 ——
+  // 各向异性坐标把各向同性云斑拉成风纹碎浪，随风漂移；只在最碎的浪尖出现
+  vec2 wdirF = normalize(uWind + vec2(0.0001, 0.0));
+  vec2 wperpF = vec2(-wdirF.y, wdirF.x);
+  float alongW = dot(vWPos.xz, wdirF);
+  float acroW = dot(vWPos.xz, wperpF);
+  float foamStreak = fbm(vec2(alongW * 0.045 - uTime * 0.25, acroW * 0.20) + crest * 2.0);
+  float foamFleck = vnoise(vWPos.xz * 0.9 + uTime * 0.4); // 米级碎点
+  float foamMask = smoothstep(0.78, 0.97, crest)
+    * smoothstep(0.55, 0.85, foamStreak)
+    * (0.35 + 0.65 * smoothstep(0.55, 0.9, foamFleck));
   vec3 foam = mix(vec3(0.028, 0.06, 0.09), vec3(0.50, 0.63, 0.68), uDayF); // 更低饱淡青白
-  waterCol = mix(waterCol, foam, foamMask * (0.05 + uDayF * 0.12));
+  waterCol = mix(waterCol, foam, foamMask * (0.03 + uDayF * 0.09));
+  // —— 水侧水线（Step B3）：紧贴岸线的海侧碎浪，与陆侧 foamDot 合成完整水线 ——
+  // 水像素中 vLand∈(0,0.02) 即岸线外 15~40m；环岸/环岛/环柱自动出现，机组区 vLand=0 不受影响
+  float surfBand = smoothstep(0.0, 0.004, vLand) * (1.0 - smoothstep(0.004, 0.02, vLand));
+  float surfN = 0.35 + 0.65 * fbm(vWPos.xz * 0.30 + vec2(-uTime * 0.35, uTime * 0.2));
+  waterCol = mix(waterCol, foam, surfBand * surfN * (0.10 + uDayF * 0.30) * vWater);
 
   // —— 夜间暗潮微光：极弱青蓝涌动 ——
   float moonSpec = pow(max(dot(Ns, halfV), 0.0), 220.0);
