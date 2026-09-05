@@ -263,6 +263,21 @@ export function biomeWeights(x: number, z: number): BiomeWeights {
   return { sand: eSand / s, tidal: eTidal / s, grass: eGrass / s, forest: eForest / s, hill: eHill / s, mountain: eMtn / s }
 }
 
+/** 高度网格烘焙（Step C1 地形投影用）：size² 采样 terrainSurfaceY，
+ *  data[j*size+i] ↔ x=(i/(size-1)-0.5)*extent, z=(j/(size-1)-0.5)*extent，
+ *  与 GPU 端 uv = xz/extent+0.5 同式（v=0 ↔ z=-extent/2，DataTexture flipY=false）。
+ *  纯真值采样，不改变任何地形 —— 陆地冻结令下允许新增的只读消费。 */
+export function bakeHeightGrid(size: number, extent: number): { size: number; extent: number; data: Float32Array } {
+  const data = new Float32Array(size * size)
+  for (let j = 0; j < size; j++) {
+    const z = (j / (size - 1) - 0.5) * extent
+    for (let i = 0; i < size; i++) {
+      data[j * size + i] = terrainSurfaceY((i / (size - 1) - 0.5) * extent, z)
+    }
+  }
+  return { size, extent, data }
+}
+
 /**
  * 地面【实际渲染面】高度（第 30 轮起连续面）。
  * 直接等于连续地形 terrainHeight（连续海床，无台地量化台阶）。
