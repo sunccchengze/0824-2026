@@ -212,6 +212,30 @@ export function signedShore(x: number, z: number): number {
   return Math.max(dn, dw)                        // 单岸陆侧
 }
 
+/**
+ * R32 · 闭式反解 landMask=0.5 等值面的带符号米距离（海侧负、陆侧正）。
+ * 复用 landMask 已有的 wN / wW 闭式场，不再走 EDT 二维扫描。
+ *
+ * landMask 中 dNorth = -z - CN0 - wobN(x)：>0 陆、<0 海
+ *   dNorth=0 等值面在 z* = -(CN0+wobN(x))（北岸零线）
+ *   距该零线的"海侧负/陆侧正"米数 = -z - (CN0+wobN(x)) - 0（dNorth 本身）
+ *   但只在 |dNorth|<RAMP_W 内有意义；超出则置 ±∞，片元用 abs 收 0..3.2m
+ *
+ * 同理 dWest = -x - CW0 - wobW(z)
+ *
+ * 取 min：陆角处取"较近"那条岸；单岸陆/海任一方向都按 d* 自身符号。
+ */
+export function terrainCoastDistance(x: number, z: number): number {
+  const dn = -z - CN0 - wobN(x)        // 北岸 dNorth：>0 陆、<0 海
+  const dw = -x - CW0 - wobW(z)        // 西岸 dWest
+  // dNorth/dWest 在 [−RAMP_W, +RAMP_W] 内线性；在带外 landMask 已饱和，
+  // 但带外我们也要给"远处有距离"的近似。RAMP_W=520，超出后线性外推。
+  // clamp 到 ±2000 防数值爆（片元 abs(...)<3.2 会把带外自然收敛到 0）。
+  const dnClamped = Math.max(-2000, Math.min(2000, dn))
+  const dwClamped = Math.max(-2000, Math.min(2000, dw))
+  return Math.min(dnClamped, dwClamped)
+}
+
 /** 沿岸地貌性格 0..1：0=平缓沙岸（宽滩+沙丘），1=岩岸岬角（崖岸+砾滩） */
 function coastalRock(x: number, z: number): number {
   const g1 = N.ridged(x * 0.00062 + 7.31, z * 0.00055 - 11.7, 4)

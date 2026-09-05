@@ -2,7 +2,7 @@
 import { useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { terrainSurfaceY, landMask, signedShore, FARM_CENTER } from './terrainUtil'
+import { terrainSurfaceY, landMask, signedShore, terrainCoastDistance, FARM_CENTER } from './terrainUtil'
 import { skyState } from './lightState'
 import { windAt } from '../data/farmSim'
 import { useSim } from '../state/simStore'
@@ -32,8 +32,11 @@ varying vec3 vWPos;
 varying vec3 vWN;
 varying float vLand;
 varying float vShore;
+varying float vCoastDist;   // R32 · 到岸线带符号米数（海侧负、陆侧正）
+varying float vBaseY;       // R32 · 顶点 y（给片元做"水色深度"参考）
 attribute float aLand;
 attribute float aShore;
+attribute float aCoastDist; // R32 · 顶点预计算的带符号岸距（避免片元再 fbm）
 uniform float uTime;
 uniform vec2 uWind;
 uniform vec2 uCenter;
@@ -66,6 +69,8 @@ void main() {
   float baseY = position.y;          // 海底/地面真值
   vLand = aLand;
   vShore = aShore;
+  vCoastDist = aCoastDist;          // R32 · 传片元
+  vBaseY = baseY;                   // R32 · 传片元
   float water = 1.0 - smoothstep(0.0, 0.02, aLand);
   vWater = water;
 
@@ -82,7 +87,9 @@ void main() {
   vec2 p = wp.xz;
   disp += gerstner(p, wdir, 0.06, 2400.0, uTime * 0.35,          tangent, binormal);
   disp += gerstner(p, d2,   0.045, 1500.0, uTime * 0.50 + 2.1,   tangent, binormal);
-  disp *= amp;
+  // R32 · 浅水阻尼：岸线 ±7m 内波浪收到 12%（避免破浪贴在风机腿上）
+  float coastDamp = 0.12 + 0.88 * smoothstep(0.0, 7.0, abs(aCoastDist));
+  disp *= (amp * coastDamp);
 
   float lift = water;
   vec3 newPos = vec3(wp.x, baseY + disp.y * lift, wp.z);
@@ -103,6 +110,8 @@ varying vec3 vWPos;
 varying vec3 vWN;
 varying float vLand;
 varying float vShore;
+varying float vCoastDist;   // R32 · 岸线带符号米数（海侧负、陆侧正）
+varying float vBaseY;       // R32 · 顶点 y（给片元做"水色深度"参考）
 uniform float uTime;
 uniform float uDayF;
 uniform float uGlow;
@@ -274,10 +283,18 @@ void main() {
     float upness = smoothstep(0.36, 0.72, N.y);
     float fres = pow(1.0 - ndv, 3.4) * upness;
 
-    vec3 deepCol   = mix(vec3(0.008, 0.022, 0.038), vec3(0.050, 0.115, 0.185), uDayF);
-    vec3 shallowCol = mix(vec3(0.024, 0.055, 0.082), vec3(0.150, 0.310, 0.420), uDayF);
+    // R32 · 深度三色（deep/mid/shallow）按距岸距离过渡：还原外海深
+    // → 中海渐浅 → 近岸浅水的真实色阶，颜色按风格 0.6×饱和 落暗调莫兰迪
+    float coastMag = max(-vCoastDist, 0.0);                   // 海侧距离（米）
+    float depthFactor = exp(-coastMag * 0.022);               // 远海→近岸 (0..1)
+    vec3 deepCol    = mix(vec3(0.005, 0.014, 0.026), vec3(0.030, 0.070, 0.110), uDayF);
+    vec3 midCol     = mix(vec3(0.010, 0.030, 0.050), vec3(0.060, 0.150, 0.220), uDayF);
+    vec3 shallowCol = mix(vec3(0.030, 0.066, 0.100), vec3(0.120, 0.260, 0.360), uDayF);
+    vec3 waterCol = mix(deepCol, midCol, depthFactor);
+    waterCol = mix(waterCol, shallowCol, exp(-coastMag * 0.22));
+    // 浪尖再叠 45% 浅色提亮（保留原"浪头浅色"质感）
+    waterCol = mix(waterCol, shallowCol, crest * 0.45);
     vec3 sandbedCol = mix(vec3(0.055, 0.075, 0.075), vec3(0.26, 0.38, 0.34), uDayF);
-    vec3 waterCol = mix(deepCol, shallowCol, crest * 0.66);
     waterCol = mix(waterCol, sandbedCol, shallow * 0.42);   // 沙底透光
 
     vec3 skyRef = mix(vec3(0.014, 0.032, 0.054), vec3(0.150, 0.290, 0.385), uDayF);
@@ -300,6 +317,13 @@ void main() {
     float shB = smoothstep(-26.0, 1.0, vShore) * (1.0 - smoothstep(1.0, 46.0, vShore));
     float shN = vnoise(vWPos.xz * 0.09 + uTime * 0.22);
     waterCol = mix(waterCol, foam, shB * smoothstep(0.55, 0.95, shN) * (0.25 + 0.4 * uDayF));
+
+    // R32 · 岸线泡沫带（沿 landMask=0.5 等值面 ±3.2m 滚动白沫，友资产做法）
+    float shoreF = 1.0 - smoothstep(0.0, 3.2, abs(vCoastDist));
+    float band = sin(abs(vCoastDist) * 2.4 - uTime * 1.6 + vnoise(vWPos.xz * 0.10) * 3.0) * 0.5 + 0.5;
+    float shoreFoam = shoreF * smoothstep(0.42, 0.62, vnoise(vWPos.xz * 0.18) * 0.55 + band * 0.35);
+    vec3 shoreFoamCol = mix(vec3(0.65, 0.75, 0.80), vec3(0.88, 0.92, 0.96), uDayF);
+    waterCol = mix(waterCol, shoreFoamCol, shoreFoam * (0.32 + 0.48 * uDayF));
 
     // 夜间暗潮微光
     float moonSpec = pow(max(dot(N, halfV), 0.0), 220.0);
@@ -371,6 +395,7 @@ function buildTerrainGeometry(qualityScale: number): THREE.BufferGeometry {
   const pos = new Float32Array(verts * 3)
   const land = new Float32Array(verts)
   const shore = new Float32Array(verts)
+  const coast = new Float32Array(verts)   // R32 · 岸线带符号米数（vertex 预算）
 
   let i = 0
   for (let ri = 0; ri < nz; ri++) {
@@ -382,6 +407,7 @@ function buildTerrainGeometry(qualityScale: number): THREE.BufferGeometry {
       pos[i * 3 + 2] = z
       land[i] = landMask(x, z)
       shore[i] = signedShore(x, z)
+      coast[i] = terrainCoastDistance(x, z)   // R32 · 直接给顶点，避免片元再 fbm
       i++
     }
   }
@@ -401,6 +427,7 @@ function buildTerrainGeometry(qualityScale: number): THREE.BufferGeometry {
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
   g.setAttribute('aLand', new THREE.BufferAttribute(land, 1))
   g.setAttribute('aShore', new THREE.BufferAttribute(shore, 1))
+  g.setAttribute('aCoastDist', new THREE.BufferAttribute(coast, 1))   // R32
   g.setIndex(idx)
   g.computeVertexNormals()
   return g
@@ -436,7 +463,7 @@ export default function WorldTerrain() {
       depthWrite: true,
       fog: false,
     })
-    m.customProgramCacheKey = () => 'terrain-ocean-v4'
+    m.customProgramCacheKey = () => 'terrain-ocean-v4-r32'   // R32 海洋真实化：varyings+三色+foam
     ;(m.userData as any).u = u
     return { geo: g, mat: m }
   }, [qScale])
