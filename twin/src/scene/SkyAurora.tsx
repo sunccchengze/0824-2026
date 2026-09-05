@@ -22,7 +22,6 @@ varying vec3 vDir;
 uniform float uTime;
 uniform float uDay;
 uniform vec3 uSunDir;
-uniform vec3 uMoonDir;
 uniform sampler2D uSkyTex;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
@@ -115,27 +114,6 @@ void main() {
   col += vec3(0.92, 0.97, 1.0) * pow(sunDot, 1400.0) * 1.35 * uDay;
   col += vec3(0.32, 0.46, 0.58) * pow(sunDot, 14.0) * 0.16 * uDay;
 
-  // R35 · 明月（夜间）
-  // 月亮圆盘 + 内核 + 软晕。moonDir.y < 0 → 月在地平线下，不画（夜空消失）
-  // pow(moonDot, N) 越大 → 圆盘越锐、halo 越弱；halo 用低指数、宽裙
-  float moonDirY = normalize(uMoonDir).y;
-  float moonVisible = smoothstep(-0.02, 0.05, moonDirY) * (1.0 - uDay * 0.85);
-  float moonDot = clamp(dot(d, normalize(uMoonDir)), 0.0, 1.0);
-  // 圆盘本体（很锐：cos³⁰⁰ 视角内亮，外侧快速衰减）
-  float disc = pow(moonDot, 3800.0) * 1.4;
-  // 月面灰白纹理（噪声 fbm 给点月表感）
-  float moonLat = atan(d.x, -d.z);
-  vec2 moonUV = vec2(moonLat, h) * 8.0;
-  float moonSurf = fbm(moonUV) * 0.18 + 0.82;
-  vec3 moonCore = vec3(0.95, 0.96, 1.00) * moonSurf;
-  // 软晕（三段指数：近 / 中 / 远）
-  float halo1 = pow(moonDot, 220.0) * 0.42;
-  float halo2 = pow(moonDot, 32.0) * 0.18;
-  float halo3 = pow(moonDot, 6.0) * 0.05;
-  vec3 moonHalo = vec3(0.62, 0.76, 0.95);
-  col += moonCore * disc * moonVisible;
-  col += moonHalo * (halo1 + halo2 + halo3) * moonVisible;
-
   gl_FragColor = vec4(col, 1.0);
 }
 `
@@ -152,7 +130,6 @@ export default function SkyAurora() {
   const uniforms = useMemo(() => ({
     uTime: { value: 0 }, uDay: { value: 0 },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
-    uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
     uSkyTex: { value: skyTexture },
   }), [skyTexture])
 
@@ -162,7 +139,6 @@ export default function SkyAurora() {
     u.uTime.value = state.clock.elapsedTime
     u.uDay.value = skyState.dayF
     u.uSunDir.value.copy(skyState.sunDir)
-    u.uMoonDir.value.copy(skyState.moonDir)
   })
 
   return (
