@@ -2,13 +2,13 @@
 import { useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { terrainSurfaceY, landMask, FARM_CENTER } from './terrainUtil'
+import { terrainSurfaceY, landMask, coastT, FARM_CENTER } from './terrainUtil'
 import { skyState } from './lightState'
 import { windAt } from '../data/farmSim'
 import { useSim } from '../state/simStore'
 
 // ============================================================
-// 海洋地面（第 29/30 轮重构：用户验收回访）
+// 海洋地面（第 32 轮 A 重构 v4：六类生物群系 + 岩雪山体 + 海面克制化）
 // ------------------------------------------------------------
 // 诉求校正：
 //   · 海陆交界要精细、陆地明显高于海 → 海盆半径扩大，海岸带陡升（terrainUtil）；
@@ -27,7 +27,10 @@ varying float vWater;
 varying vec3 vWPos;
 varying vec3 vWN;
 varying float vLand;
+varying float vH;
+varying float vCoast;
 attribute float aLand;
+attribute float aCoast;
 uniform float uTime;
 uniform vec2 uWind;
 uniform vec2 uCenter;
@@ -64,6 +67,8 @@ void main() {
   float water = 1.0 - smoothstep(0.0, 0.02, aLand);
   vWater = water;
   vLand = aLand;
+  vH = baseY;
+  vCoast = aCoast;
 
   // 近场收敛：离场心越近波浪越收敛（塔基贴地、风场稳定）
   float d = length(wp.xz - uCenter);
@@ -101,6 +106,8 @@ varying float vWater;
 varying vec3 vWPos;
 varying vec3 vWN;
 varying float vLand;
+varying float vH;
+varying float vCoast;
 uniform float uTime;
 uniform float uDayF;
 uniform float uGlow;
@@ -173,11 +180,11 @@ void main() {
   // 参照用户原图：海底深青黑，浪尖点缀青白，整体暗、不刺眼。
   vec3 deepCol  = mix(vec3(0.008, 0.022, 0.038), vec3(0.050, 0.115, 0.185), uDayF); // 浪谷（深青黑）
   vec3 shallowCol = mix(vec3(0.024, 0.055, 0.082), vec3(0.150, 0.310, 0.420), uDayF); // 浪尖（低饱和青蓝）
-  vec3 waterCol = mix(deepCol, shallowCol, crest * 0.66);
+  vec3 waterCol = mix(deepCol, shallowCol, crest * 0.55);
 
   // 天空反射：低饱和灰青蓝（白天）→ 近黑（夜），权重压低避免整片洗灰
   vec3 skyRef = mix(vec3(0.014, 0.032, 0.054), vec3(0.150, 0.290, 0.385), uDayF);
-  waterCol = mix(waterCol, skyRef, clamp(fres, 0.0, 1.0) * (0.055 + 0.085 * uDayF));
+  waterCol = mix(waterCol, skyRef, clamp(fres, 0.0, 1.0) * (0.045 + 0.07 * uDayF));
 
   // —— 太阳/月亮镜面高光：细碎点状波光（点状，克制，不高亮成云斑）——
   vec3 halfV = normalize(V + uSunDir);
@@ -185,44 +192,70 @@ void main() {
   float sparkle = fbm(vWPos.xz * 0.12 + uTime * 0.8) * fbm(vWPos.xz * 0.35 - uTime * 0.5);
   spec *= (0.10 + 0.90 * sparkle);
   vec3 sunCol = mix(vec3(0.11, 0.26, 0.38), vec3(0.80, 0.80, 0.78), uDayF);
-  waterCol += sunCol * spec * (uDayF * 0.9 + night * 0.16);
+  waterCol += sunCol * spec * (uDayF * 0.72 + night * 0.13);
 
   // —— 波峰泡沫：只在 crest，且提频打散成细碎稀疏浪花（克制；避免大块云斑）——
-  float foamNoise = fbm(vWPos.xz * 0.075 + uTime * 0.06 + crest * 3.0);
-  float foamMask = smoothstep(0.66, 0.98, crest) * (0.10 + 0.60 * smoothstep(0.58, 0.86, foamNoise));
+  float foamNoise = fbm(vWPos.xz * 0.16 + uTime * 0.06 + crest * 3.0);
+  float foamMask = smoothstep(0.72, 0.98, crest) * (0.10 + 0.60 * smoothstep(0.58, 0.86, foamNoise));
   vec3 foam = mix(vec3(0.028, 0.06, 0.09), vec3(0.50, 0.63, 0.68), uDayF); // 更低饱淡青白
-  waterCol = mix(waterCol, foam, foamMask * (0.08 + uDayF * 0.18));
+  waterCol = mix(waterCol, foam, foamMask * (0.05 + uDayF * 0.12));
 
   // —— 夜间暗潮微光：极弱青蓝涌动 ——
   float moonSpec = pow(max(dot(Ns, halfV), 0.0), 220.0);
   waterCol += vec3(0.05, 0.13, 0.20) * moonSpec * night * uGlow * 0.30;
   waterCol += vec3(0.02, 0.06, 0.11) * crest * night * uGlow * 0.40;
 
-  // —— 陆地（分带生物群系：近岸黄沙 → 内陆森林 → 远山），与海面形成强对比 ——
-  // 用 vLand（0..1，向陆地线性增大）作为「离海岸远近」的代理：
-  //   vLand ∈ (0, 0.16)：沙带；vLand ∈ (0.14, 0.62)：森林；vLand > 0.55：远山。
-  float sandMask  = 1.0 - smoothstep(0.06, 0.17, vLand);            // 近岸沙带(只在低land)
-  float forestMask = smoothstep(0.12, 0.26, vLand) * (1.0 - smoothstep(0.60, 0.80, vLand));
-  float mtnMask   = smoothstep(0.55, 0.85, vLand);                 // 内陆远山
+  // —— 陆地 v4（六类生物群系 + 岩雪山体，第 32 轮 A）——
+  // 与 CPU 端 biomeWeights() 同式；L = vLand（0 海 → 1 内陆）。
+  float L = vLand;
+  float wSand   = 1.0 - smoothstep(0.06, 0.16, L);
+  float wTidal  = smoothstep(0.05, 0.12, L) * (1.0 - smoothstep(0.16, 0.28, L));
+  float wGrass  = smoothstep(0.14, 0.30, L) * (1.0 - smoothstep(0.45, 0.62, L));
+  float wForest = smoothstep(0.38, 0.55, L) * (1.0 - smoothstep(0.68, 0.82, L));
+  float wHill   = smoothstep(0.60, 0.75, L) * (1.0 - smoothstep(0.85, 0.95, L));
+  float wMtn    = smoothstep(0.82, 0.93, L);
+  float wSandE = pow(wSand, 1.25); float wTidalE = pow(wTidal, 1.25); float wGrassE = pow(wGrass, 1.25);
+  float wForestE = pow(wForest, 1.25); float wHillE = pow(wHill, 1.25); float wMtnE = pow(wMtn, 1.25);
+  float wSum = wSandE + wTidalE + wGrassE + wForestE + wHillE + wMtnE + 1e-5;
+  wSand = wSandE / wSum; wTidal = wTidalE / wSum; wGrass = wGrassE / wSum;
+  wForest = wForestE / wSum; wHill = wHillE / wSum; wMtn = wMtnE / wSum;
 
-  // 沙：低饱和暖黄（克制、不刺眼的黄褐），白天亮、夜里压暗
-  vec3 sandCol = mix(vec3(0.075, 0.058, 0.036), vec3(0.40, 0.34, 0.20), uDayF);
-  // 森林：低饱和冷绿（莫兰迪），白天呈现灰绿林地
-  vec3 forestCol = mix(vec3(0.035, 0.055, 0.044), vec3(0.12, 0.24, 0.15), uDayF);
-  // 远山：深灰青（大气剪影感，接原有冷调）
-  vec3 mtnCol = vec3(0.014, 0.030, 0.050) + vec3(0.012, 0.032, 0.055) * uDayF * 0.9;
+  // 日间群系色（A-round2：拉开色相/明度距离，分层可辨；仍压住饱和，克制不刺眼）
+  vec3 cSand   = vec3(0.450, 0.360, 0.240); // 干沙（暖亮）
+  vec3 cTidal  = vec3(0.160, 0.130, 0.090); // 潮间湿沙（深，湿润感）
+  vec3 cGrass  = vec3(0.150, 0.270, 0.110); // 草原（正绿，降黄）
+  vec3 cForest = vec3(0.070, 0.160, 0.100); // 林地（深绿）
+  vec3 cHill   = vec3(0.230, 0.200, 0.130); // 缓丘（棕橄榄，与林地区分）
+  vec3 cRock   = vec3(0.110, 0.120, 0.140); // 山岩（深灰）
+
+  // 细节噪声：草原/林地高频斑驳、沙粒微粒、山岩分形
+  float g1 = vnoise(vWPos.xz * 0.020);
+  float g2 = vnoise(vWPos.xz * 0.055 + 7.3);
+  float grassN = g1 * 0.65 + g2 * 0.35;
+  float sandN = vnoise(vWPos.xz * 0.11 + 3.1);
+  float rockN = fbm(vWPos.xz * 0.008 + 1.7);
+  float crownN = g1 * 0.5 + fbm(vWPos.xz * 0.030) * 0.5;
+
+  vec3 landDay = cSand * (0.92 + 0.16 * sandN) * wSand
+               + cTidal * wTidal
+               + cGrass * (0.85 + 0.30 * grassN) * wGrass
+               + cForest * (0.78 + 0.44 * crownN) * wForest
+               + cHill * (0.85 + 0.30 * rockN) * wHill
+               + cRock * (0.80 + 0.40 * rockN) * wMtn;
+
+  // 雪冠：世界高度超过雪线（与 CPU 端 SNOW_LINE=205 同值）且坡面朝上；
+  // 只在远山带显著积雪（过渡带少量）。
+  float snow = smoothstep(205.0, 265.0, vH) * (0.35 + 0.65 * smoothstep(0.55, 0.80, N.y));
+  snow *= 0.35 + 0.65 * wMtn;
+  vec3 cSnow = vec3(0.75, 0.78, 0.82); // 雪（提亮，与深灰山岩拉开）
+  landDay = mix(landDay, cSnow * (0.85 + 0.30 * rockN), clamp(snow, 0.0, 1.0));
 
   float lm = vnoise(vWPos.xz * 0.0021);
   lm += 0.5 * vnoise(vWPos.xz * 0.0055);
-  // 森林纹理：细碎树冠斑驳（高频）、低饱和
-  float forestN = vnoise(vWPos.xz * 0.012);
-  forestN += 0.5 * vnoise(vWPos.xz * 0.030);
 
-  vec3 landCol = mtnCol;
-  // 森林在台地，沙在近岸，两者在各自带内叠加
-  landCol = mix(landCol, forestCol * (0.82 + 0.28 * forestN), forestMask * 0.9);
-  landCol = mix(landCol, sandCol * (0.9 + 0.2 * vnoise(vWPos.xz * 0.02)), sandMask * 0.9);
-  landCol += (lm - 0.5) * 0.04;                    // 微弱整体斑驳
+  // 昼夜：夜间统一压暗（保留冷调），白天补微弱冷光
+  vec3 landCol = landDay * mix(vec3(0.19, 0.20, 0.23), vec3(1.0), uDayF);
+  landCol += (lm - 0.5) * 0.04;                        // 微弱整体斑驳
   landCol += vec3(0.012, 0.040, 0.060) * uDayF * 0.45; // 白天冷调补光
 
   vec3 col = mix(landCol, waterCol, vWater);
@@ -245,14 +278,17 @@ export default function WorldTerrain() {
     g.rotateX(-Math.PI / 2)
     const pos = g.attributes.position as THREE.BufferAttribute
     const land = new Float32Array(pos.count)
+    const coast = new Float32Array(pos.count)
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i)
       const z = pos.getZ(i)
       const y = terrainSurfaceY(x, z)
       pos.setY(i, y)
       land[i] = landMask(x, z)
+      coast[i] = coastT(x, z)
     }
     g.setAttribute('aLand', new THREE.BufferAttribute(land, 1))
+    g.setAttribute('aCoast', new THREE.BufferAttribute(coast, 1))
     g.computeVertexNormals()
 
     const u = {
@@ -275,7 +311,7 @@ export default function WorldTerrain() {
       depthWrite: true,
       fog: false,
     })
-    m.customProgramCacheKey = () => 'terrain-ocean-v3'
+    m.customProgramCacheKey = () => 'terrain-ocean-v4'
     ;(m.userData as any).u = u
     return { geo: g, mat: m }
   }, [])
