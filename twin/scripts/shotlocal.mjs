@@ -1,6 +1,4 @@
 // R32 临时截图：复用现有 shot.mjs 但用系统 Chrome（无需 NSS）
-import { fileURLToPath } from 'node:url'
-import path from 'node:path'
 import puppeteer from 'puppeteer-core'
 
 const url = process.argv[2] || 'http://127.0.0.1:5173/'

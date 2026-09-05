@@ -7,7 +7,10 @@ import {
   farmFrame, optimizeYaw, windAt, FARM_RATED_MW,
 } from '../src/data/farmSim.ts'
 import { powerCurveKw, yawFactor, wakeDeficit, TILT_F, wakeDeflection } from '../src/data/turbinePhysics.ts'
-import { FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY } from '../src/scene/terrainUtil.ts'
+import {
+  FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY,
+  landMask, biomeWeights, SNOW_LINE, grassSampleHits,
+} from '../src/scene/terrainUtil.ts'
 
 let pass = 0
 let fail = 0
@@ -249,6 +252,72 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
   let waveOK = true
   for (const u of FARM) if (Math.abs(terrainSurfaceY(u.x, u.z) - terrainHeight(u.x, u.z)) > 1e-9) waveOK = false
   ok('V&V 波浪位移不污染贴地基准（静态几何=terrainSurfaceY）', waveOK, '机位贴地基准与地形同源')
+}
+
+// 16. 第 32 轮 A：真实海岸线/地貌（分形海岸 + 六群系 + 岛岬 + 草地核心）
+// ---------------------------------------------------------------
+// A1 海岸数值：机组/升压站零沾陆、600m 环零沾陆、开放侧纯海、升压站压平
+{
+  let mxUnit = 0
+  for (const u of [...FARM, SUBSTATION]) mxUnit = Math.max(mxUnit, landMask(u.x, u.z))
+  ok('R32-A1 机组/升压站零沾陆：landMask ≡ 0', mxUnit === 0, `max=${mxUnit}`)
+
+  // 600m 环采 16 点/机：过渡踪（>0.02）都不许进环
+  let ringBad = 0
+  for (const u of [...FARM, SUBSTATION]) {
+    for (let a = 0; a < 16; a++) {
+      const px = u.x + 600 * Math.cos((a / 16) * 2 * Math.PI)
+      const pz = u.z + 600 * Math.sin((a / 16) * 2 * Math.PI)
+      if (landMask(px, pz) > 0.02) ringBad++
+    }
+  }
+  ok('R32-A1 600m 机组净距：环上 160 点零沾陆（>0.02 即 fail）', ringBad === 0, `沾陆点=${ringBad}`)
+
+  // 开放侧（南/东 2300m 探针）：纯海、无岛 mask、无抬升
+  let openPure = true
+  for (const dir of [[0, 1] as const, [1, 0] as const]) {
+    const [dx, dz] = dir
+    const x = FARM_CENTER.x + dx * 2300
+    const z = FARM_CENTER.z + dz * 2300
+    if (landMask(x, z) !== 0 || terrainHeight(x, z) > 12) openPure = false
+  }
+  ok('R32-A1 开放外海纯净：南/东探针 landMask=0 且高度≤12m', openPure, '两相邻侧开放为海')
+
+  ok('R32-A1 升压站局地压平：站体高度 ≤3m', terrainHeight(SUBSTATION.x, SUBSTATION.z) <= 3,
+    `=${terrainHeight(SUBSTATION.x, SUBSTATION.z).toFixed(2)}m`)
+}
+
+// A2 生物群系：海面全零、权重归一、中带草原+林地主导
+{
+  const sea = biomeWeights(FARM_CENTER.x, FARM_CENTER.z)
+  const seaZero = sea.sand === 0 && sea.tidal === 0 && sea.grass === 0
+    && sea.forest === 0 && sea.hill === 0 && sea.mountain === 0
+  ok('R32-A2 海面群系全零（场心 land=0 处）', seaZero, JSON.stringify(sea))
+
+  // 中带点（-100,-2600）：L≈0.45，草原+林地应主导，权重和归一
+  const w = biomeWeights(-100, -2600)
+  const L = landMask(-100, -2600)
+  const sum = w.sand + w.tidal + w.grass + w.forest + w.hill + w.mountain
+  ok('R32-A2 中带草原+林地主导（L≈0.45 处）',
+    L > 0.3 && L < 0.6 && w.grass + w.forest > 0.6, `L=${L.toFixed(3)} grass=${w.grass.toFixed(2)} forest=${w.forest.toFixed(2)}`)
+  ok('R32-A2 权重归一（和=1）', close(sum, 1, 1e-9), `sum=${sum}`)
+}
+
+// A3 雪线：SNOW_LINE=205；远山有雪载体（>205）、草原带无雪（<205）
+{
+  ok('R32-A3 雪线 SNOW_LINE = 205（CPU/GPU 同值）', SNOW_LINE === 205, `=${SNOW_LINE}`)
+  const deepH = terrainHeight(-100, -4200) // 北岸深陆远山带
+  ok('R32-A3 远山带高于雪线（雪冠有载体）', deepH > SNOW_LINE, `=${deepH.toFixed(1)}m`)
+  const midH = terrainHeight(-100, -2600) // 草原中带
+  ok('R32-A3 草原带低于雪线（雪不污染草原）', midH < SNOW_LINE, `=${midH.toFixed(1)}m`)
+}
+
+// A4 草地核心：2 万次试投，草原/林下命中 >1%（>200）
+{
+  const g = grassSampleHits(0)
+  const f = grassSampleHits(1)
+  ok('R32-A4 草原带可落位（拒绝采样命中>1%）', g > 200, `命中=${g}/20000`)
+  ok('R32-A4 林下可落位（拒绝采样命中>1%）', f > 200, `命中=${f}/20000`)
 }
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)

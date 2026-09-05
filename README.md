@@ -1,6 +1,6 @@
 # 0824-2026 · 风电场 3A 数字孪生（方案与设计仓）
 
-> 目标：为西北安交大风电场偏航优化项目打造**影院级、深色系、3D Web 数字孪生**（对标 51World/数字冰雹/Omniverse 的观感），部署至 Cloudflare Pages。
+> 目标：为西安交大风电场偏航优化项目打造**影院级、深色系、3D Web 数字孪生**（对标 51World/数字冰雹/Omniverse 的观感），部署至 Cloudflare Pages。
 > 现役科研台 [wind-farm-viz.pages.dev](https://wind-farm-viz.pages.dev/) 保持封板不动；本仓是它的**暗色旗舰姊妹篇**。
 
 ## 📚 文档导航
