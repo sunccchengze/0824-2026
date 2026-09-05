@@ -91,9 +91,10 @@ void main() {
   vec3 newPos = vec3(wp.x, baseY + disp.y * lift, wp.z);
   newPos.xz += disp.xz * lift * 0.75;
 
-  // 法线：混合大尺度 Gerstner 法线与上向法线；陆地用原始（近似上向）
+  // 法线：海水用大尺度 Gerstner 法线；陆地用真实几何法线（computeVertexNormals），
+  // 山体明暗/雪沟/裸岩全靠它 —— 此前陆地近似上向是“盐堆”感的根因（round4 修复）
   vec3 gNorm = normalize(cross(binormal, tangent));
-  vec3 n = normalize(mix(vec3(0.0, 1.0, 0.0), gNorm, water));
+  vec3 n = normalize(mix(normal, gNorm, water));
   vWN = n;
 
   gl_Position = projectionMatrix * modelViewMatrix * vec4(newPos, 1.0);
@@ -208,8 +209,12 @@ void main() {
   // —— 陆地 v4（六类生物群系 + 岩雪山体，第 32 轮 A）——
   // 与 CPU 端 biomeWeights() 同式；L = vLand（0 海 → 1 内陆）。
   float L = vLand;
-  float wSand   = 1.0 - smoothstep(0.06, 0.16, L);
-  float wTidal  = smoothstep(0.05, 0.12, L) * (1.0 - smoothstep(0.16, 0.28, L));
+  // 岸线破碎（round5）：渲染级高频扰动，沙/潮带按扰动后的 Lp 落位，水线参差 ——
+  // CPU 端 biomeWeights 仍用平滑 L（草地散布不需要 40m 级参差），此处分歧是渲染级细节。
+  float shoreN = fbm(vWPos.xz * 0.025 + 11.3);
+  float Lp = L + (shoreN - 0.5) * 0.16;
+  float wSand   = 1.0 - smoothstep(0.06, 0.16, Lp);
+  float wTidal  = smoothstep(0.05, 0.12, Lp) * (1.0 - smoothstep(0.16, 0.28, Lp));
   float wGrass  = smoothstep(0.14, 0.30, L) * (1.0 - smoothstep(0.45, 0.62, L));
   float wForest = smoothstep(0.38, 0.55, L) * (1.0 - smoothstep(0.68, 0.82, L));
   float wHill   = smoothstep(0.60, 0.75, L) * (1.0 - smoothstep(0.85, 0.95, L));
@@ -223,7 +228,7 @@ void main() {
   // 日间群系色（A-round2：拉开色相/明度距离，分层可辨；仍压住饱和，克制不刺眼）
   vec3 cSand   = vec3(0.450, 0.360, 0.240); // 干沙（暖亮）
   vec3 cTidal  = vec3(0.160, 0.130, 0.090); // 潮间湿沙（深，湿润感）
-  vec3 cGrass  = vec3(0.150, 0.270, 0.110); // 草原（正绿，降黄）
+  vec3 cGrass  = vec3(0.135, 0.235, 0.095); // 草原（压暗，远观不晃眼）
   vec3 cForest = vec3(0.070, 0.160, 0.100); // 林地（深绿）
   vec3 cHill   = vec3(0.230, 0.200, 0.130); // 缓丘（棕橄榄，与林地区分）
   vec3 cRock   = vec3(0.110, 0.120, 0.140); // 山岩（深灰）
@@ -234,21 +239,94 @@ void main() {
   float grassN = g1 * 0.65 + g2 * 0.35;
   float sandN = vnoise(vWPos.xz * 0.11 + 3.1);
   float rockN = fbm(vWPos.xz * 0.008 + 1.7);
+  float ribs = fbm(vec2(vWPos.x * 0.020 + vWPos.z * 0.013, vWPos.z * 0.031 - vWPos.x * 0.007)); // 沟脊（雪沟/岩脊/AO共用）
   float crownN = g1 * 0.5 + fbm(vWPos.xz * 0.030) * 0.5;
 
   vec3 landDay = cSand * (0.92 + 0.16 * sandN) * wSand
                + cTidal * wTidal
-               + cGrass * (0.85 + 0.30 * grassN) * wGrass
+               + cGrass * (0.78 + 0.44 * grassN) * wGrass
                + cForest * (0.78 + 0.44 * crownN) * wForest
                + cHill * (0.85 + 0.30 * rockN) * wHill
                + cRock * (0.80 + 0.40 * rockN) * wMtn;
+  // 陆地起伏漫反射（只作用陆地；雪有自己的日光模型，不在此重复压暗）
+  float landDiff = 0.70 + 0.30 * clamp(dot(N, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
+  landDay *= mix(1.0, landDiff, 1.0 - vWater);
+  // 湿沙带：紧贴水线压暗（退潮湿润感），只作用沙/潮带 —— 岸线“镶边”，破画笔渐变
+  float wetBand = (1.0 - smoothstep(0.015, 0.10, Lp)) * clamp(wSand + wTidal, 0.0, 1.0);
+  landDay *= 1.0 - wetBand * 0.45;
 
-  // 雪冠：世界高度超过雪线（与 CPU 端 SNOW_LINE=205 同值）且坡面朝上；
-  // 只在远山带显著积雪（过渡带少量）。
-  float snow = smoothstep(205.0, 265.0, vH) * (0.35 + 0.65 * smoothstep(0.55, 0.80, N.y));
+  // —— 细节法线（round4）：高频起伏扰动，只用于雪/岩光照，制造嶙峋光影 ——
+  float eD = 6.0;
+  float dHx = fbm(vWPos.xz * 0.045 + 3.7) - fbm(vWPos.xz * 0.045 - vec2(eD * 0.045, 0.0) + 3.7);
+  float dHz = fbm(vWPos.xz * 0.045 + 3.7) - fbm(vWPos.xz * 0.045 - vec2(0.0, eD * 0.045) + 3.7);
+  vec3 Ndet = normalize(N + vec3(-dHx * 2.2, 0.0, -dHz * 2.2));
+  // 微起伏（round8）：米级地表凹凸进法线，近看有“颗粒”，远处衰减防闪烁
+  float camDist = length(cameraPosition - vWPos);
+  float microFade = exp(-camDist / 380.0);
+  if (microFade > 0.01) {
+    float m1 = fbm(vWPos.xz * 0.55 + 7.1);
+    float m2 = fbm(vWPos.xz * 0.55 + vec2(2.5, 0.0) + 7.1);
+    float m3 = fbm(vWPos.xz * 0.55 + vec2(0.0, 2.5) + 7.1);
+    Ndet = normalize(Ndet + vec3((m1 - m2) * 1.6, 0.0, (m1 - m3) * 1.6) * microFade);
+  }
+  float fade2 = exp(-camDist / 500.0); // 反照率微细节衰减（比法线稍远）
+
+  // 山脊裸岩：坡陡处露出山岩（细节法线让岩壁有明暗皴擦，谷地留绿）
+  float steep = 1.0 - Ndet.y;
+  float rockExp = smoothstep(0.42, 0.72, steep) * clamp(wHill + wMtn, 0.0, 1.0);
+  landDay = mix(landDay, cRock * (0.85 + 0.30 * rockN), clamp(rockExp, 0.0, 1.0) * 0.85);
+
+  // —— 雪冠 v2（round4）：岩脊雪沟 + 日光质感，告别“盐堆” ——
+  // 沟留雪、脊露岩：高频脊线 + 雪线扰动打破“一刀切”（雪线 380/460，与 CPU SNOW_LINE 同值）
+  float snow = smoothstep(380.0, 460.0, vH + (ribs - 0.5) * 90.0);
+  float slopeGate = smoothstep(0.35, 0.70, Ndet.y); // 陡壁挂不住雪（窄脊主峰正需要）
+  float ribGate = 0.50 + 0.50 * smoothstep(0.30, 0.70, ribs); // 沟雪脊岩
+  snow *= (0.25 + 0.75 * slopeGate) * ribGate;
   snow *= 0.35 + 0.65 * wMtn;
-  vec3 cSnow = vec3(0.75, 0.78, 0.82); // 雪（提亮，与深灰山岩拉开）
-  landDay = mix(landDay, cSnow * (0.85 + 0.30 * rockN), clamp(snow, 0.0, 1.0));
+  float snowM = clamp(snow, 0.0, 1.0);
+  // 雪的日光：向阳暖白 / 背阴冷蓝（整块平板白的根因在此）
+  float sunDiff = clamp(dot(Ndet, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
+  vec3 snowCol = mix(vec3(0.42, 0.50, 0.66), vec3(1.02, 1.00, 0.97), sunDiff);
+  // 风蚀纹（sastrugi）：拉伸条纹明暗，近看有“风雕”质感
+  float sast = fbm(vec2((vWPos.x + vWPos.z) * 0.06, (vWPos.x - vWPos.z) * 0.012));
+  snowCol *= 0.88 + 0.24 * sast;
+  // 雪晶闪光：只在向阳面星星点点（白天反光强度的来源，克制）
+  vec3 Vv = normalize(cameraPosition - vWPos);
+  vec3 Hv = normalize(Vv + uSunDir);
+  float glint = pow(max(dot(Ndet, Hv), 0.0), 60.0);
+  float glintN = fbm(vWPos.xz * 0.12 + uTime * 0.05);
+  snowCol += vec3(1.0, 0.98, 0.94) * glint * smoothstep(0.50, 0.9, glintN) * uDayF * 4.0 * sunDiff;
+  landDay = mix(landDay, snowCol, snowM);
+  // 岩石质感（round5）：层理 + 碎石颗粒 + 凹缝 AO，杀“塑料黏土”；
+  // round10 起只给高山 + 陡壁（丘陵带保持干净植被，不再整片压灰）
+  float strata = sin(vH * 0.33 + rockN * 5.0 + Ndet.x * 2.0);
+  float rockGrain = vnoise(vWPos.xz * 0.06) * 0.6 + vnoise(vWPos.xz * 0.17 + 4.2) * 0.4;
+  float crevAO = 0.70 + 0.30 * smoothstep(0.25, 0.75, ribs * 0.5 + rockGrain * 0.5);
+  float rockZone = clamp(wMtn + rockExp, 0.0, 1.0);
+  float rockTex = (0.88 + 0.12 * strata) * (0.78 + 0.44 * rockGrain) * crevAO;
+  landDay *= mix(1.0, rockTex, (1.0 - snowM) * clamp(rockZone, 0.0, 1.0));
+  // 微反照率（round8）：厘米~米级地表质感，放大看的本钱；植被（草/树）不管，只做地
+  if (fade2 > 0.02) {
+    // 沙：风成波纹（定向）+ 散布卵石
+    float ripple = sin(dot(vWPos.xz, vec2(0.9, 0.45)) * 2.2 + fbm(vWPos.xz * 0.15) * 9.0);
+    float pebble = step(0.965, hash21(floor(vWPos.xz * 2.6) + 1.0));
+    float sandZone = clamp(wSand + wTidal, 0.0, 1.0);
+    landDay *= 1.0 + (ripple * 0.10 + (fbm(vWPos.xz * 2.3) - 0.5) * 0.25) * sandZone * fade2;
+    landDay *= 1.0 - pebble * 0.35 * sandZone * fade2;
+    // 草地：丛块浓淡（不是草叶，是地被斑驳；种草另起）
+    float tuft = fbm(vWPos.xz * 0.9 + 2.2);
+    landDay *= 1.0 + (tuft - 0.5) * 0.35 * clamp(wGrass + wForest * 0.5, 0.0, 1.0) * fade2;
+    // 岩：裂隙网（深色脉）+ 碎石灰点
+    float crack = 1.0 - abs(2.0 * fbm(vWPos.xz * 0.33 + 5.5) - 1.0);
+    crack = pow(crack, 3.0);
+    float scree = step(0.975, hash21(floor(vWPos.xz * 3.1) + 7.0));
+    float bareRock = clamp(rockZone, 0.0, 1.0) * (1.0 - snowM);
+    landDay *= 1.0 - crack * 0.40 * bareRock * fade2;
+    landDay *= 1.0 + scree * 0.30 * bareRock * fade2;
+    // 水线：泡沫碎点（陆侧水线镶边，水体泡沫归 Step B）
+    float foamDot = step(0.93, hash21(floor(vWPos.xz * 1.4) + 3.0)) * (1.0 - smoothstep(0.005, 0.05, Lp));
+    landDay = mix(landDay, vec3(0.75, 0.82, 0.84), foamDot * 0.7 * fade2);
+  }
 
   float lm = vnoise(vWPos.xz * 0.0021);
   lm += 0.5 * vnoise(vWPos.xz * 0.0055);
@@ -273,7 +351,7 @@ void main() {
 export default function WorldTerrain() {
   const { geo, mat } = useMemo(() => {
     const SIZE = 9200
-    const SEG = 300
+    const SEG = 400 // round8：23m 单元（160k 顶点，启动多 ~2s，换近岸轮廓）
     const g = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG)
     g.rotateX(-Math.PI / 2)
     const pos = g.attributes.position as THREE.BufferAttribute

@@ -42,7 +42,7 @@ const smoothstep = (e0: number, e1: number, x: number) => {
   return t * t * (3 - 2 * t)
 }
 
-// ---- 地形：开放外海 + 两相邻侧陆地（第 32 轮 A-round2：用户回访加码）----
+// ---- 地形：开放外海 + 两相邻侧陆地（第 32 轮 A-round3：复杂地貌奇观）----
 // 第 31 轮的海岸是单层 fbm 直线切割带（wobble ±320m），岬湾尺度单一；
 // 本轮升级为「7 层噪声蜿蜒 + 大小高斯弧岬湾 + 双侧钳制 + 不规则离岸群岛/海岬」——
 //  · 海域张角 100°（西岸线绕北角向南偏东 10°，不再是横平竖直的 90°）；
@@ -50,6 +50,9 @@ const smoothstep = (e0: number, e1: number, x: number) => {
 //  · 北(-z)、西(-x) 为陆地，海岸线多尺度曲折（50m 微齿 ~ 3km 大岬湾）；
 //  · 全部 9 机与升压站仍位于海中央（600m 机组净距硬约束，见 cap/bayCap）；
 //  · 内陆远山加高锐化（300~550m 奇崛山体，雪冠载体更大）；
+//  · 主峰直插云霄（1100m 级）+ 域扭曲山脊谷地 + 丘陵盆地；
+//  · 峡湾水道深切北岸（长 1.6km、宽 220~560m，两壁陡峭，海岬变湾中岛）；
+//  · 海蚀柱群（离岸峭岩，浪蚀奇观）；
 //  · 海床仍只保留极低幅微地貌（±2m），贴地稳定。
 // 注：R32-R34 系回退后重做（见 twin/docs/research/R32-R34-改造提示词.md），
 //     因原 commit 不在本快照内，函数名与原实现未必逐字一致，但几何约束等价。
@@ -64,8 +67,14 @@ const CW0 = 1750
 const TILT10 = 0.1763
 /** 倾角枢轴 z（北角拐点，与北岸标称衔接） */
 const TILT_PIVOT_Z = -2100
-/** 海岸抬升带宽（0→RAMP_W 米内 land 0→1，决定沙带/潮带宽度） */
-export const RAMP_W = 520
+/** 海岸抬升基础带宽（round6：520→1400，海滩平原铺开；round7 起实际宽度按位置随机）。
+ *  岸线 0 等值线位置不动，机组净距不受影响。 */
+export const RAMP_W = 1400
+/** 有效过渡带宽（米）：低频噪声分区（0.55~1.55 倍，770~2170m）——
+ *  有的岸段短促、有的绵长，坡度和长度都因地而异（round7）。 */
+function rampAt(x: number, z: number): number {
+  return RAMP_W * (0.5 + 1.1 * N.fbm(x * 0.00035 + 3.3, z * 0.00035 - 8.8, 2))
+}
 /** 蜿蜒钳制（cap/bayCap）：向陆最多 -380m；向海（bay 侧）北岸 +200 / 西岸 +350 ——
  *  与 CN0/CW0 联立保证：9 机 + 升压站处 landMask ≡ 0，且 600m 环内零沾陆
  *  （实测最近沾陆约 700m＠T09——东南卫星小岛方向，本土岸线更远；
@@ -131,6 +140,34 @@ export const SATS: CoastFeature[] = [
 export const HEADLANDS: CoastFeature[] = [
   { x: -1250, z: -2400, r: 480, h: 42, p1: 0, p2: 0, p3: 0 }, // 北岸向南突出的海岬（距 T01 1218m）
 ]
+/** 主峰（直插云霄）+ 次峰：深陆无人区，只做视觉奇观，不触碰任何约束 */
+export interface Peak { x: number; z: number; r: number; h: number }
+export const PEAKS: Peak[] = [
+  { x: -2700, z: -3900, r: 600, h: 900 }, // 主峰（56° 陡壁窄脊，合计 1200m 级）
+  { x: -1600, z: -4200, r: 450, h: 550 }, // 次峰（群峰呼应）
+]
+/** 丘陵盆地：台地带平滑洼陷（纯视觉起伏，深陆内部） */
+export interface Basin { x: number; z: number; r: number; depth: number }
+export const BASINS: Basin[] = [
+  { x: -2300, z: -2500, r: 520, depth: 30 },
+  { x: 1400, z: -3300, r: 440, depth: 26 },
+]
+/** 峡湾水道：由口(A)向源头(B)深切北岸。只做减法（carve 陆地），机组侧恒为海，
+ *  不可能凭空造陆 —— 600m 净距约束天然不受威胁。 */
+export const FJORD_A = { x: -400, z: -1750 } // 口（可靠海域，距 T01 约 580m）
+export const FJORD_B = { x: -700, z: -3250 } // 源头（深陆）
+function fjordCarve(x: number, z: number): number {
+  const vx = FJORD_B.x - FJORD_A.x, vz = FJORD_B.z - FJORD_A.z
+  const t = Math.max(0, Math.min(1, ((x - FJORD_A.x) * vx + (z - FJORD_A.z) * vz) / (vx * vx + vz * vz)))
+  const d = Math.hypot(x - FJORD_A.x - vx * t, z - FJORD_A.z - vz * t)
+  return 1 - smoothstep(110, 280, d) // 通道内全切（宽 220m），边缘 280m 羽化成峭壁
+}
+/** 海蚀柱群：离岸峭岩（小半径高锥，浪蚀奇观；全部纯海中央） */
+export const STACKS: CoastFeature[] = [
+  { x: -1000, z: -1700, r: 45, h: 20, p1: 1.0, p2: 2.0, p3: 3.0 }, // 西岬外柱（岬前 467m 海中）
+  { x: -1150, z: -1500, r: 38, h: 16, p1: 3.0, p2: 5.0, p3: 1.0 }, // 西岬外柱二
+  { x: 2400, z: 400, r: 48, h: 18, p1: 2.0, p2: 4.0, p3: 0.0 },    // 东外海孤柱
+]
 /** 岛极坐标：角向谐波半径 rr(θ)，设色 mask 与锥形抬升共用（同一真值） */
 function islandPolar(f: CoastFeature, x: number, z: number): { d: number; rr: number } {
   const dx = x - f.x, dz = z - f.z
@@ -139,14 +176,15 @@ function islandPolar(f: CoastFeature, x: number, z: number): { d: number; rr: nu
   const rr = f.r * (1 + 0.22 * Math.sin(3 * th + f.p1) + 0.14 * Math.sin(5 * th + f.p2) + 0.09 * Math.sin(8 * th + f.p3))
   return { d, rr }
 }
-/** 全部离岸岛（二主二卫）：mask 与抬升共用此表 */
-const ISLES: CoastFeature[] = [...ISLANDS, ...SATS]
+/** 全部离岸地貌（二主岛二卫岛一海岬三海蚀柱）：mask 与抬升共用此表 */
+const ISLES: CoastFeature[] = [...ISLANDS, ...SATS, ...HEADLANDS, ...STACKS]
 
 /** 方向性陆地基底（北/西，不含岛——岛只做锥形抬升+设色，不触发内陆分带） */
 function landBase(x: number, z: number): number {
-  const wN = smoothstep(0, RAMP_W, dNorth(x, z))
-  const wW = smoothstep(0, RAMP_W, dWest(x, z))
-  return Math.max(wN, wW)
+  const rw = rampAt(x, z)
+  const wN = smoothstep(0, rw, dNorth(x, z))
+  const wW = smoothstep(0, rw, dWest(x, z))
+  return Math.max(wN, wW) * (1 - fjordCarve(x, z))
 }
 
 /** 海岸过渡场（与陆地基底同式，不含岛）：vCoast / Step B 海岸距离场的同一真值 */
@@ -168,8 +206,9 @@ export function landMask(x: number, z: number): number {
   return m
 }
 
-/** 雪线（米）：山地带中世界高度超过此值染雪冠（GPU 端，见 WorldTerrain v4） */
-export const SNOW_LINE = 205
+/** 雪线（米）：山地带中世界高度超过此值染雪冠（GPU 端，见 WorldTerrain v4）。
+ *  round5：205→300；round10：300→380 —— 只属于主峰/次峰/最高山脊，雪下露岩重见天日。 */
+export const SNOW_LINE = 380
 
 /** 确定性 RNG（草地落位与 selftest 共用，保证"采样验证"与"真实落位"同分布） */
 export function mulberry32(seed: number) {
@@ -239,26 +278,38 @@ export function terrainHeight(x: number, z: number): number {
   const bed = (N.fbm(x * 0.0009, z * 0.0009, 3) - 0.5) * 4.0
   let h = 2.0 + bed
   if (land > 0) {
-    // 分带：近岸沙带(矮、平缓) → 森林台地(中、丘陵起伏) → 内陆远山(高、奇崛)
+    // 分带（round7 全程缓坡 + round9 还回远山）：沙带 → 台地拉长 → 高地【线性登山】
+    // （全程等坡、无后墙；上限 400m 级 + 高矮分区；近岸 1km 仍是滩原丘陵）
     const sand = smoothstep(0.0, 0.28, land)      // 近海黄沙带
-    const forest = smoothstep(0.20, 0.72, land)   // 森林台地
-    const mountain = smoothstep(0.55, 1.0, land)  // 内陆远山
+    const forest = smoothstep(0.20, 0.80, land)   // 森林台地（拉长，盖住中段）
+    const mountain = clamp01((land - 0.55) / 0.45) // 内陆高地（线性登山）
     const roll = (N.fbm(x * 0.0021 + 8.8, z * 0.0021 - 3.3, 2) - 0.5) * 2 // 台地丘陵起伏 ±12m
     const crag = N.ridged(x * 0.00032 + 3.1, z * 0.00032 - 1.4, 4)        // 主峰（锐化）
     const crag2 = N.ridged(x * 0.0011 - 7.7, z * 0.0011 + 4.2, 2)         // 次峰（破碎感）
+    const warp = (N.fbm(x * 0.0004 - 11.0, z * 0.0004 + 5.0, 3) - 0.5) * 1600 // 域扭曲（山脊走弯）
+    const ridge = N.ridged(x * 0.0009 + warp * 0.0009 + 3.1, z * 0.0009 - 1.4, 3) // 曲折山脊谷地
+    const mAmp = 0.85 + 0.6 * N.fbm(x * 0.0002 - 5.5, z * 0.0002 + 2.2, 2) // 山系高矮分区
     h += sand * 10
     h += forest * (34 + 20 * N.ridged(x * 0.0005 + 1.7, z * 0.0005 - 9.3, 3) + 12 * roll)
-    h += mountain * (90 + 300 * crag ** 1.4 + 60 * crag2)
+    h += mountain * (90 + 170 * crag + 70 * crag2 + 70 * ridge) * mAmp
+    for (const b of BASINS) { // 丘陵盆地（平滑洼陷）
+      const db = Math.hypot(x - b.x, z - b.z)
+      if (db < b.r) h -= b.depth * (1 - smoothstep(0, b.r, db))
+    }
+  }
+  for (const pk of PEAKS) { // 主峰/次峰（近直线锥整面陡壁 + 冰川沟壑，直插云霄）
+    const dp = Math.hypot(x - pk.x, z - pk.z)
+    if (dp < pk.r) {
+      const prof = 1 - smoothstep(0, pk.r, dp)
+      const gully = (N.ridged(x * 0.006 + pk.x * 0.01, z * 0.006 - pk.z * 0.01, 3) - 0.5) * 2
+      h += pk.h * prof ** 1.15 + pk.h * 0.20 * gully * prof
+    }
   }
   // 离岸岛/海岬（第 32 轮）：不规则轮廓锥形抬升（中心全高 → rr+180m 处归零），
   // 与主体陆地自然衔接；岛只走本抬升，不触发上面的内陆分带（避免岛变高山）。
   for (const f of ISLES) {
     const { d, rr } = islandPolar(f, x, z)
     if (d < rr + 180) h += f.h * (1 - smoothstep(0, rr + 180, d))
-  }
-  for (const f of HEADLANDS) {
-    const d = Math.hypot(x - f.x, z - f.z)
-    if (d < f.r + 220) h += f.h * (1 - smoothstep(0, f.r + 220, d))
   }
   // 升压站局地再压平（站体仍在海中央）
   const dS = Math.hypot(x - SUBSTATION.x, z - SUBSTATION.z)

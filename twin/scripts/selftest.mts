@@ -10,6 +10,7 @@ import { powerCurveKw, yawFactor, wakeDeficit, TILT_F, wakeDeflection } from '..
 import {
   FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY,
   landMask, biomeWeights, SNOW_LINE, grassSampleHits,
+  PEAKS, FJORD_A, FJORD_B, STACKS, HEADLANDS,
 } from '../src/scene/terrainUtil.ts'
 
 let pass = 0
@@ -230,10 +231,11 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
     if (sy > 12) seaOK = false // 风机区是海床，应接近海平面
   }
   // 第 31 轮「开放外海」：北(-z)/西(-x) 两相邻侧为陆地，南(+z)/东(+x) 两相邻侧开放为海。
-  // 陆地侧在离场心约 2300m 处应已明显高于海面（≥30m）。
+  // round6 起过渡带放宽至 1400m（缓坡入海），探针相应外移至 3000m（仍应 ≥30m）——
+  // 旧 2300m 探针锁的是“一堵墙”，与用户要的缓坡直接冲突，故外移而非降低阈值。
   for (const dir of [[0, -1] as const, [-1, 0] as const]) {
     const [dx, dz] = dir
-    const h = terrainHeight(FARM_CENTER.x + dx * 2300, FARM_CENTER.z + dz * 2300)
+    const h = terrainHeight(FARM_CENTER.x + dx * 3000, FARM_CENTER.z + dz * 3000)
     if (h < 30) coastOK = false
   }
   // 开放侧：南(+z)/东(+x) 在离场心 2300m 处应仍为海床（≤12m，无陆地抬升）
@@ -294,22 +296,57 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
     && sea.forest === 0 && sea.hill === 0 && sea.mountain === 0
   ok('R32-A2 海面群系全零（场心 land=0 处）', seaZero, JSON.stringify(sea))
 
-  // 中带点（-100,-2600）：L≈0.45，草原+林地应主导，权重和归一
-  const w = biomeWeights(-100, -2600)
-  const L = landMask(-100, -2600)
+  // 中带点：x=-100 列自适应找 L∈[0.4,0.7]（ramp 宽度会变，固定坐标不可靠）
+  let midZ = 0
+  for (let z = -2000; z >= -4600; z -= 50) {
+    const L = landMask(-100, z)
+    if (L >= 0.4 && L <= 0.7) { midZ = z; break }
+  }
+  const w = biomeWeights(-100, midZ)
+  const L = landMask(-100, midZ)
   const sum = w.sand + w.tidal + w.grass + w.forest + w.hill + w.mountain
-  ok('R32-A2 中带草原+林地主导（L≈0.45 处）',
-    L > 0.3 && L < 0.6 && w.grass + w.forest > 0.6, `L=${L.toFixed(3)} grass=${w.grass.toFixed(2)} forest=${w.forest.toFixed(2)}`)
+  ok('R32-A2 中带草原+林地主导（L∈[0.4,0.7] 处）',
+    midZ !== 0 && w.grass + w.forest > 0.6, `z=${midZ} L=${L.toFixed(3)} grass=${w.grass.toFixed(2)} forest=${w.forest.toFixed(2)}`)
   ok('R32-A2 权重归一（和=1）', close(sum, 1, 1e-9), `sum=${sum}`)
 }
 
 // A3 雪线：SNOW_LINE=205；远山有雪载体（>205）、草原带无雪（<205）
 {
-  ok('R32-A3 雪线 SNOW_LINE = 205（CPU/GPU 同值）', SNOW_LINE === 205, `=${SNOW_LINE}`)
-  const deepH = terrainHeight(-100, -4200) // 北岸深陆远山带
-  ok('R32-A3 远山带高于雪线（雪冠有载体）', deepH > SNOW_LINE, `=${deepH.toFixed(1)}m`)
+  ok('R32-A3 雪线 SNOW_LINE = 380（CPU/GPU 同值，round10 上调）', SNOW_LINE === 380, `=${SNOW_LINE}`)
+  // round7 起高地振幅分区高矮，固定深陆点未必高于雪线 —— 改扫北陆块存在性
+  // （主峰 1200m 级恒在，雪冠载体不可能消失；断言存在性而非定点高度）
+  let highFound = false
+  for (let x = -4600; x <= -100 && !highFound; x += 200) {
+    for (let z = -4600; z <= -2100; z += 200) {
+      if (landMask(x, z) > 0.9 && terrainHeight(x, z) > SNOW_LINE) { highFound = true; break }
+    }
+  }
+  ok('R32-A3 高地高于雪线（雪冠有载体）', highFound, '北陆块扫描')
   const midH = terrainHeight(-100, -2600) // 草原中带
   ok('R32-A3 草原带低于雪线（雪不污染草原）', midH < SNOW_LINE, `=${midH.toFixed(1)}m`)
+}
+
+// A5 复杂地貌奇观（round3）：主峰高度、峡湾通道为海、海岬连陆、海蚀柱孤立
+{
+  const peakH = terrainHeight(PEAKS[0].x, PEAKS[0].z)
+  ok('R32-A5 主峰直插云霄（>600m，12倍轮毂高的量级）', peakH > 600, `=${peakH.toFixed(0)}m`)
+  const midX = (FJORD_A.x + FJORD_B.x) / 2
+  const midZ = (FJORD_A.z + FJORD_B.z) / 2
+  ok('R32-A5 峡湾通道为海（中线 landMask=0）', landMask(midX, midZ) === 0,
+    `L=${landMask(midX, midZ)} h=${terrainHeight(midX, midZ).toFixed(1)}m`)
+  const hd = HEADLANDS[0]
+  ok('R32-A5 海岬连陆（mask=1，为连岛岬非孤岛）', landMask(hd.x, hd.z) === 1,
+    `L=${landMask(hd.x, hd.z)}`)
+  // 每柱配一个向海见证点（柱体 mask≈1、高>10m，向海一侧 300m 外为海即孤立；
+  // 近岸柱的向陆一侧本就连浅滩，不在此约束）
+  const WIT: [number, number][] = [[-700, -1700], [-850, -1350], [2700, 400]]
+  let stacksOK = true
+  STACKS.forEach((st, i) => {
+    if (landMask(st.x, st.z) < 0.9) stacksOK = false
+    if (terrainHeight(st.x, st.z) < 10) stacksOK = false
+    if (landMask(WIT[i][0], WIT[i][1]) !== 0) stacksOK = false
+  })
+  ok('R32-A5 海蚀柱孤立（体 mask≈1、高>10m、向海见证点为海）', stacksOK, '三柱')
 }
 
 // A4 草地核心：2 万次试投，草原/林下命中 >1%（>200）
