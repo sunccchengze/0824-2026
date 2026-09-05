@@ -1,0 +1,2535 @@
+diff --git a/01a06f7e-44e0-7e7a-96ab-5adfab74fdc6.patch b/01a06f7e-44e0-7e7a-96ab-5adfab74fdc6.patch
+deleted file mode 100644
+index c2add42..0000000
+--- a/01a06f7e-44e0-7e7a-96ab-5adfab74fdc6.patch
++++ /dev/null
+@@ -1,1331 +0,0 @@
+-diff --git a/README.md b/README.md
+-index a82d475..a565e42 100644
+---- a/README.md
+-+++ b/README.md
+-@@ -1,6 +1,6 @@
+- # 0824-2026 · 风电场 3A 数字孪生（方案与设计仓）
+- 
+--> 目标：为西北安交大风电场偏航优化项目打造**影院级、深色系、3D Web 数字孪生**（对标 51World/数字冰雹/Omniverse 的观感），部署至 Cloudflare Pages。
+-+> 目标：为西安交大风电场偏航优化项目打造**影院级、深色系、3D Web 数字孪生**（对标 51World/数字冰雹/Omniverse 的观感），部署至 Cloudflare Pages。
+- > 现役科研台 [wind-farm-viz.pages.dev](https://wind-farm-viz.pages.dev/) 保持封板不动；本仓是它的**暗色旗舰姊妹篇**。
+- 
+- ## 📚 文档导航
+-diff --git a/twin/scripts/selftest.mts b/twin/scripts/selftest.mts
+-index 4d21572..e725f9e 100644
+---- a/twin/scripts/selftest.mts
+-+++ b/twin/scripts/selftest.mts
+-@@ -4,10 +4,14 @@
+- // 依赖：仅 Node 22 原生类型剥离；无浏览器、无网络。
+- // ================================================================
+- import {
+--  farmFrame, optimizeYaw, windAt, FARM_RATED_MW,
+-+  farmFrame, optimizeYaw, windAt, FARM_RATED_MW, dayNight,
+- } from '../src/data/farmSim.ts'
+- import { powerCurveKw, yawFactor, wakeDeficit, TILT_F, wakeDeflection } from '../src/data/turbinePhysics.ts'
+--import { FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY } from '../src/scene/terrainUtil.ts'
+-+import {
+-+  FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY,
+-+  landMask, biomeWeights, SNOW_LINE, grassSampleHits,
+-+  PEAKS, FJORD_A, FJORD_B, STACKS, HEADLANDS, bakeHeightGrid, shoreDistance,
+-+} from '../src/scene/terrainUtil.ts'
+- 
+- let pass = 0
+- let fail = 0
+-@@ -227,10 +231,11 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
+-     if (sy > 12) seaOK = false // 风机区是海床，应接近海平面
+-   }
+-   // 第 31 轮「开放外海」：北(-z)/西(-x) 两相邻侧为陆地，南(+z)/东(+x) 两相邻侧开放为海。
+--  // 陆地侧在离场心约 2300m 处应已明显高于海面（≥30m）。
+-+  // round6 起过渡带放宽至 1400m（缓坡入海），探针相应外移至 3000m（仍应 ≥30m）——
+-+  // 旧 2300m 探针锁的是“一堵墙”，与用户要的缓坡直接冲突，故外移而非降低阈值。
+-   for (const dir of [[0, -1] as const, [-1, 0] as const]) {
+-     const [dx, dz] = dir
+--    const h = terrainHeight(FARM_CENTER.x + dx * 2300, FARM_CENTER.z + dz * 2300)
+-+    const h = terrainHeight(FARM_CENTER.x + dx * 3000, FARM_CENTER.z + dz * 3000)
+-     if (h < 30) coastOK = false
+-   }
+-   // 开放侧：南(+z)/东(+x) 在离场心 2300m 处应仍为海床（≤12m，无陆地抬升）
+-@@ -251,5 +256,138 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
+-   ok('V&V 波浪位移不污染贴地基准（静态几何=terrainSurfaceY）', waveOK, '机位贴地基准与地形同源')
+- }
+- 
+-+// 16. 第 32 轮 A：真实海岸线/地貌（分形海岸 + 六群系 + 岛岬 + 草地核心）
+-+// ---------------------------------------------------------------
+-+// A1 海岸数值：机组/升压站零沾陆、600m 环零沾陆、开放侧纯海、升压站压平
+-+{
+-+  let mxUnit = 0
+-+  for (const u of [...FARM, SUBSTATION]) mxUnit = Math.max(mxUnit, landMask(u.x, u.z))
+-+  ok('R32-A1 机组/升压站零沾陆：landMask ≡ 0', mxUnit === 0, `max=${mxUnit}`)
+-+
+-+  // 600m 环采 16 点/机：过渡踪（>0.02）都不许进环
+-+  let ringBad = 0
+-+  for (const u of [...FARM, SUBSTATION]) {
+-+    for (let a = 0; a < 16; a++) {
+-+      const px = u.x + 600 * Math.cos((a / 16) * 2 * Math.PI)
+-+      const pz = u.z + 600 * Math.sin((a / 16) * 2 * Math.PI)
+-+      if (landMask(px, pz) > 0.02) ringBad++
+-+    }
+-+  }
+-+  ok('R32-A1 600m 机组净距：环上 160 点零沾陆（>0.02 即 fail）', ringBad === 0, `沾陆点=${ringBad}`)
+-+
+-+  // 开放侧（南/东 2300m 探针）：纯海、无岛 mask、无抬升
+-+  let openPure = true
+-+  for (const dir of [[0, 1] as const, [1, 0] as const]) {
+-+    const [dx, dz] = dir
+-+    const x = FARM_CENTER.x + dx * 2300
+-+    const z = FARM_CENTER.z + dz * 2300
+-+    if (landMask(x, z) !== 0 || terrainHeight(x, z) > 12) openPure = false
+-+  }
+-+  ok('R32-A1 开放外海纯净：南/东探针 landMask=0 且高度≤12m', openPure, '两相邻侧开放为海')
+-+
+-+  ok('R32-A1 升压站局地压平：站体高度 ≤3m', terrainHeight(SUBSTATION.x, SUBSTATION.z) <= 3,
+-+    `=${terrainHeight(SUBSTATION.x, SUBSTATION.z).toFixed(2)}m`)
+-+}
+-+
+-+// A2 生物群系：海面全零、权重归一、中带草原+林地主导
+-+{
+-+  const sea = biomeWeights(FARM_CENTER.x, FARM_CENTER.z)
+-+  const seaZero = sea.sand === 0 && sea.tidal === 0 && sea.grass === 0
+-+    && sea.forest === 0 && sea.hill === 0 && sea.mountain === 0
+-+  ok('R32-A2 海面群系全零（场心 land=0 处）', seaZero, JSON.stringify(sea))
+-+
+-+  // 中带点：x=-100 列自适应找 L∈[0.4,0.7]（ramp 宽度会变，固定坐标不可靠）
+-+  let midZ = 0
+-+  for (let z = -2000; z >= -4600; z -= 50) {
+-+    const L = landMask(-100, z)
+-+    if (L >= 0.4 && L <= 0.7) { midZ = z; break }
+-+  }
+-+  const w = biomeWeights(-100, midZ)
+-+  const L = landMask(-100, midZ)
+-+  const sum = w.sand + w.tidal + w.grass + w.forest + w.hill + w.mountain
+-+  ok('R32-A2 中带草原+林地主导（L∈[0.4,0.7] 处）',
+-+    midZ !== 0 && w.grass + w.forest > 0.6, `z=${midZ} L=${L.toFixed(3)} grass=${w.grass.toFixed(2)} forest=${w.forest.toFixed(2)}`)
+-+  ok('R32-A2 权重归一（和=1）', close(sum, 1, 1e-9), `sum=${sum}`)
+-+}
+-+
+-+// A3 雪线：SNOW_LINE=205；远山有雪载体（>205）、草原带无雪（<205）
+-+{
+-+  ok('R32-A3 雪线 SNOW_LINE = 380（CPU/GPU 同值，round10 上调）', SNOW_LINE === 380, `=${SNOW_LINE}`)
+-+  // round7 起高地振幅分区高矮，固定深陆点未必高于雪线 —— 改扫北陆块存在性
+-+  // （主峰 1200m 级恒在，雪冠载体不可能消失；断言存在性而非定点高度）
+-+  let highFound = false
+-+  for (let x = -4600; x <= -100 && !highFound; x += 200) {
+-+    for (let z = -4600; z <= -2100; z += 200) {
+-+      if (landMask(x, z) > 0.9 && terrainHeight(x, z) > SNOW_LINE) { highFound = true; break }
+-+    }
+-+  }
+-+  ok('R32-A3 高地高于雪线（雪冠有载体）', highFound, '北陆块扫描')
+-+  const midH = terrainHeight(-100, -2600) // 草原中带
+-+  ok('R32-A3 草原带低于雪线（雪不污染草原）', midH < SNOW_LINE, `=${midH.toFixed(1)}m`)
+-+}
+-+
+-+// A5 复杂地貌奇观（round3）：主峰高度、峡湾通道为海、海岬连陆、海蚀柱孤立
+-+{
+-+  const peakH = terrainHeight(PEAKS[0].x, PEAKS[0].z)
+-+  ok('R32-A5 主峰直插云霄（>600m，12倍轮毂高的量级）', peakH > 600, `=${peakH.toFixed(0)}m`)
+-+  const midX = (FJORD_A.x + FJORD_B.x) / 2
+-+  const midZ = (FJORD_A.z + FJORD_B.z) / 2
+-+  ok('R32-A5 峡湾通道为海（中线 landMask=0）', landMask(midX, midZ) === 0,
+-+    `L=${landMask(midX, midZ)} h=${terrainHeight(midX, midZ).toFixed(1)}m`)
+-+  const hd = HEADLANDS[0]
+-+  ok('R32-A5 海岬连陆（mask=1，为连岛岬非孤岛）', landMask(hd.x, hd.z) === 1,
+-+    `L=${landMask(hd.x, hd.z)}`)
+-+  // 每柱配一个向海见证点（柱体 mask≈1、高>10m，向海一侧 300m 外为海即孤立；
+-+  // 近岸柱的向陆一侧本就连浅滩，不在此约束）
+-+  const WIT: [number, number][] = [[-700, -1700], [-850, -1350], [2700, 400]]
+-+  let stacksOK = true
+-+  STACKS.forEach((st, i) => {
+-+    if (landMask(st.x, st.z) < 0.9) stacksOK = false
+-+    if (terrainHeight(st.x, st.z) < 10) stacksOK = false
+-+    if (landMask(WIT[i][0], WIT[i][1]) !== 0) stacksOK = false
+-+  })
+-+  ok('R32-A5 海蚀柱孤立（体 mask≈1、高>10m、向海见证点为海）', stacksOK, '三柱')
+-+}
+-+
+-+// A4 草地核心：2 万次试投，草原/林下命中 >1%（>200）
+-+{
+-+  const g = grassSampleHits(0)
+-+  const f = grassSampleHits(1)
+-+  ok('R32-A4 草原带可落位（拒绝采样命中>1%）', g > 200, `命中=${g}/20000`)
+-+  ok('R32-A4 林下可落位（拒绝采样命中>1%）', f > 200, `命中=${f}/20000`)
+-+}
+-+
+-+// C1 高度烘焙：网格索引↔坐标映射与真值逐点一致（GPU uv = xz/extent+0.5 的 CPU 侧锁）
+-+{
+-+  const g = bakeHeightGrid(16, 9200)
+-+  const pts: Array<[number, number]> = [[0, 0], [15, 15], [0, 15], [15, 0], [7, 9], [3, 12]]
+-+  let gridOK = g.size === 16 && g.extent === 9200 && g.data.length === 256
+-+  for (const [i, j] of pts) {
+-+    const x = (i / 15 - 0.5) * 9200, z = (j / 15 - 0.5) * 9200
+-+    if (Math.abs(g.data[j * 16 + i] - terrainSurfaceY(x, z)) > 0.01) gridOK = false // Float32 存取容差
+-+  }
+-+  ok('R32-C1 高度烘焙映射一致（索引↔坐标↔真值）', gridOK, '16²抽6点')
+-+}
+-+
+-+// C3 月夜约定：午夜月在天上（仰角>30°）、正午月在地平线下、月相门控对位
+-+{
+-+  const mid = dayNight(0)
+-+  const noon = dayNight(12)
+-+  const moonOK = mid.moonDir[1] > 0.5 && mid.moonF === 1
+-+    && noon.moonDir[1] < 0.2 && noon.moonF === 0
+-+    && noon.dayF === 1 && mid.dayF === 0
+-+  ok('R32-C3 月夜约定（午夜月高悬/正午月隐/门控对位）', moonOK,
+-+    `午夜月高=${mid.moonDir[1].toFixed(2)} 正午月高=${noon.moonDir[1].toFixed(2)}`)
+-+}
+-+
+-+// B2 近岸距离场：机组区远海（>600m，与600m净距约束同口径，实际封顶1200）、陆上/岛心归零
+-+{
+-+  const dFarm = shoreDistance(FARM_CENTER.x, FARM_CENTER.z)
+-+  const dLand = shoreDistance(-100, -4200)
+-+  const dIsle = shoreDistance(1700, 700)
+-+  ok('R32-B2 近岸距离场（机组远海/陆上归零）', dFarm > 600 && dLand === 0 && dIsle === 0,
+-+    `机组=${dFarm.toFixed(0)}m 陆=${dLand} 岛=${dIsle}`)
+-+}
+-+
+- console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)
+- process.exit(fail ? 1 : 0)
+-diff --git a/twin/scripts/shotlocal.mjs b/twin/scripts/shotlocal.mjs
+-index 31714ca..c38e0d7 100644
+---- a/twin/scripts/shotlocal.mjs
+-+++ b/twin/scripts/shotlocal.mjs
+-@@ -1,6 +1,4 @@
+- // R32 临时截图：复用现有 shot.mjs 但用系统 Chrome（无需 NSS）
+--import { fileURLToPath } from 'node:url'
+--import path from 'node:path'
+- import puppeteer from 'puppeteer-core'
+- 
+- const url = process.argv[2] || 'http://127.0.0.1:5173/'
+-diff --git a/twin/shots/stepA10_hero.png b/twin/shots/stepA10_hero.png
+-new file mode 100644
+-index 0000000..f31aceb
+-Binary files /dev/null and b/twin/shots/stepA10_hero.png differ
+-diff --git a/twin/shots/stepA10_peak.png b/twin/shots/stepA10_peak.png
+-new file mode 100644
+-index 0000000..adb4882
+-Binary files /dev/null and b/twin/shots/stepA10_peak.png differ
+-diff --git a/twin/shots/stepA11_hero.png b/twin/shots/stepA11_hero.png
+-new file mode 100644
+-index 0000000..5051990
+-Binary files /dev/null and b/twin/shots/stepA11_hero.png differ
+-diff --git a/twin/shots/stepA11_peak.png b/twin/shots/stepA11_peak.png
+-new file mode 100644
+-index 0000000..316d57a
+-Binary files /dev/null and b/twin/shots/stepA11_peak.png differ
+-diff --git a/twin/shots/stepB1_hero.png b/twin/shots/stepB1_hero.png
+-new file mode 100644
+-index 0000000..f6466a4
+-Binary files /dev/null and b/twin/shots/stepB1_hero.png differ
+-diff --git a/twin/shots/stepB1_water.png b/twin/shots/stepB1_water.png
+-new file mode 100644
+-index 0000000..7d04148
+-Binary files /dev/null and b/twin/shots/stepB1_water.png differ
+-diff --git a/twin/shots/stepB2_hero.png b/twin/shots/stepB2_hero.png
+-new file mode 100644
+-index 0000000..efef28e
+-Binary files /dev/null and b/twin/shots/stepB2_hero.png differ
+-diff --git a/twin/shots/stepB2_water.png b/twin/shots/stepB2_water.png
+-new file mode 100644
+-index 0000000..e25a3e0
+-Binary files /dev/null and b/twin/shots/stepB2_water.png differ
+-diff --git a/twin/shots/stepC1_dawn.png b/twin/shots/stepC1_dawn.png
+-new file mode 100644
+-index 0000000..b3a8111
+-Binary files /dev/null and b/twin/shots/stepC1_dawn.png differ
+-diff --git a/twin/shots/stepC1_hero.png b/twin/shots/stepC1_hero.png
+-new file mode 100644
+-index 0000000..f7b7317
+-Binary files /dev/null and b/twin/shots/stepC1_hero.png differ
+-diff --git a/twin/shots/stepC2_fade.png b/twin/shots/stepC2_fade.png
+-new file mode 100644
+-index 0000000..35de054
+-Binary files /dev/null and b/twin/shots/stepC2_fade.png differ
+-diff --git a/twin/shots/stepC2_hero.png b/twin/shots/stepC2_hero.png
+-new file mode 100644
+-index 0000000..51a6140
+-Binary files /dev/null and b/twin/shots/stepC2_hero.png differ
+-diff --git a/twin/shots/stepC3_day.png b/twin/shots/stepC3_day.png
+-new file mode 100644
+-index 0000000..bb0d098
+-Binary files /dev/null and b/twin/shots/stepC3_day.png differ
+-diff --git a/twin/shots/stepC3_moon.png b/twin/shots/stepC3_moon.png
+-new file mode 100644
+-index 0000000..5689f5f
+-Binary files /dev/null and b/twin/shots/stepC3_moon.png differ
+-diff --git a/twin/shots/stepC3_night.png b/twin/shots/stepC3_night.png
+-new file mode 100644
+-index 0000000..a75efb4
+-Binary files /dev/null and b/twin/shots/stepC3_night.png differ
+-diff --git a/twin/shots/stepC4_hero.png b/twin/shots/stepC4_hero.png
+-new file mode 100644
+-index 0000000..ef2184b
+-Binary files /dev/null and b/twin/shots/stepC4_hero.png differ
+-diff --git a/twin/src/App.tsx b/twin/src/App.tsx
+-index c9ad47c..e1cb2bc 100644
+---- a/twin/src/App.tsx
+-+++ b/twin/src/App.tsx
+-@@ -84,7 +84,7 @@ export default function App() {
+-             onCreated={({ gl, scene, camera }) => {
+-               gl.toneMapping = THREE.ACESFilmicToneMapping
+-               gl.toneMappingExposure = 1.14
+--              scene.fog = new THREE.FogExp2('#040911', 0.00022)
+-+              scene.fog = new THREE.FogExp2('#040911', 0.00013) // C4：0.00022→0.00013 —— 4500m峰从63%雾洗降到25%，去“大雾”，留空气感
+-               const canvas = gl.domElement
+-               canvas.addEventListener('webglcontextlost', (e) => {
+-                 e.preventDefault()
+-diff --git a/twin/src/data/farmSim.ts b/twin/src/data/farmSim.ts
+-index 9148eda..2aa0c4e 100644
+---- a/twin/src/data/farmSim.ts
+-+++ b/twin/src/data/farmSim.ts
+-@@ -429,7 +429,9 @@ export function dayNight(tHours: number): {
+-   const sy = Math.sin(el)
+-   const dayF = Math.min(1, Math.max(0, (elDeg + 4) / 16)) // 连续，触底 0
+-   // 月亮=日对点：方位 az+180、仰角 −38·sinθ（夜正昼负），日落/日出天然衔接
+--  const elM = (38 * Math.sin(th) * Math.PI) / 180
+-+  // C3 修正：旧式 38·sinθ 在午夜为 −37°（月在地平线下）而正午 +38°（月高悬），
+-+  // 正负写反 —— 夜里 moonF=1 却只能从地平线爬出微光，正是“没有月亮”的根因
+-+  const elM = (-38 * Math.sin(th) * Math.PI) / 180
+-   const azM = az + Math.PI
+-   const moonF = Math.min(1, Math.max(0, (-elDeg + 3) / 18))
+-   return {
+-diff --git a/twin/src/scene/SkyAurora.tsx b/twin/src/scene/SkyAurora.tsx
+-index b0e6cd6..1d0fbbf 100644
+---- a/twin/src/scene/SkyAurora.tsx
+-+++ b/twin/src/scene/SkyAurora.tsx
+-@@ -22,6 +22,7 @@ varying vec3 vDir;
+- uniform float uTime;
+- uniform float uDay;
+- uniform vec3 uSunDir;
+-+uniform vec3 uMoonDir;
+- uniform sampler2D uSkyTex;
+- 
+- float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+-@@ -114,6 +115,20 @@ void main() {
+-   col += vec3(0.92, 0.97, 1.0) * pow(sunDot, 1400.0) * 1.35 * uDay;
+-   col += vec3(0.32, 0.46, 0.58) * pow(sunDot, 14.0) * 0.16 * uDay;
+- 
+-+  // —— 明月（C3）：月轮 + 晕 + 远辉，随夜色渐显（night 门控，昼夜连续不断裂）——
+-+  vec3 md = normalize(uMoonDir);
+-+  float moonDot = clamp(dot(d, md), 0.0, 1.0);
+-+  float mDisc = smoothstep(0.99980, 0.99995, moonDot); // 月面（~0.6°）
+-+  float limb = 0.75 + 0.25 * smoothstep(0.99980, 1.0, moonDot); // 临边昏暗
+-+  vec3 moonWhite = vec3(0.92, 0.96, 1.0);
+-+  col += moonWhite * mDisc * limb * 2.4 * night; // 明盘
+-+  // 月海：两块暗斑（程序写意，不求精确环形山）
+-+  float maria = smoothstep(0.45, 0.9, fbm(d.xy * 900.0 + md.xy * 130.0));
+-+  col -= moonWhite * mDisc * maria * 0.35 * night;
+-+  col += vec3(0.55, 0.70, 0.85) * pow(moonDot, 900.0) * 0.9 * night; // 内晕
+-+  col += vec3(0.35, 0.52, 0.68) * pow(moonDot, 90.0) * 0.22 * night; // 外晕
+-+  col += vec3(0.20, 0.32, 0.44) * pow(moonDot, 9.0) * 0.10 * night; // 远辉（月出月落的地平气息）
+-+
+-   gl_FragColor = vec4(col, 1.0);
+- }
+- `
+-@@ -130,6 +145,7 @@ export default function SkyAurora() {
+-   const uniforms = useMemo(() => ({
+-     uTime: { value: 0 }, uDay: { value: 0 },
+-     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+-+    uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
+-     uSkyTex: { value: skyTexture },
+-   }), [skyTexture])
+- 
+-@@ -139,6 +155,7 @@ export default function SkyAurora() {
+-     u.uTime.value = state.clock.elapsedTime
+-     u.uDay.value = skyState.dayF
+-     u.uSunDir.value.copy(skyState.sunDir)
+-+    u.uMoonDir.value.copy(skyState.moonDir)
+-   })
+- 
+-   return (
+-diff --git a/twin/src/scene/WorldTerrain.tsx b/twin/src/scene/WorldTerrain.tsx
+-index 6635e4a..78eb008 100644
+---- a/twin/src/scene/WorldTerrain.tsx
+-+++ b/twin/src/scene/WorldTerrain.tsx
+-@@ -2,13 +2,13 @@
+- import { useMemo } from 'react'
+- import { useFrame } from '@react-three/fiber'
+- import * as THREE from 'three'
+--import { terrainSurfaceY, landMask, FARM_CENTER } from './terrainUtil'
+-+import { terrainSurfaceY, landMask, coastT, FARM_CENTER, bakeHeightGrid, shoreDistance } from './terrainUtil'
+- import { skyState } from './lightState'
+- import { windAt } from '../data/farmSim'
+- import { useSim } from '../state/simStore'
+- 
+- // ============================================================
+--// 海洋地面（第 29/30 轮重构：用户验收回访）
+-+// 海洋地面（第 32 轮 A 重构 v4：六类生物群系 + 岩雪山体 + 海面克制化）
+- // ------------------------------------------------------------
+- // 诉求校正：
+- //   · 海陆交界要精细、陆地明显高于海 → 海盆半径扩大，海岸带陡升（terrainUtil）；
+-@@ -27,7 +27,12 @@ varying float vWater;
+- varying vec3 vWPos;
+- varying vec3 vWN;
+- varying float vLand;
+-+varying float vH;
+-+varying float vCoast;
+-+varying float vShore;
+- attribute float aLand;
+-+attribute float aCoast;
+-+attribute float aShore;
+- uniform float uTime;
+- uniform vec2 uWind;
+- uniform vec2 uCenter;
+-@@ -64,6 +69,9 @@ void main() {
+-   float water = 1.0 - smoothstep(0.0, 0.02, aLand);
+-   vWater = water;
+-   vLand = aLand;
+-+  vH = baseY;
+-+  vCoast = aCoast;
+-+  vShore = aShore;
+- 
+-   // 近场收敛：离场心越近波浪越收敛（塔基贴地、风场稳定）
+-   float d = length(wp.xz - uCenter);
+-@@ -86,9 +94,10 @@ void main() {
+-   vec3 newPos = vec3(wp.x, baseY + disp.y * lift, wp.z);
+-   newPos.xz += disp.xz * lift * 0.75;
+- 
+--  // 法线：混合大尺度 Gerstner 法线与上向法线；陆地用原始（近似上向）
+-+  // 法线：海水用大尺度 Gerstner 法线；陆地用真实几何法线（computeVertexNormals），
+-+  // 山体明暗/雪沟/裸岩全靠它 —— 此前陆地近似上向是“盐堆”感的根因（round4 修复）
+-   vec3 gNorm = normalize(cross(binormal, tangent));
+--  vec3 n = normalize(mix(vec3(0.0, 1.0, 0.0), gNorm, water));
+-+  vec3 n = normalize(mix(normal, gNorm, water));
+-   vWN = n;
+- 
+-   gl_Position = projectionMatrix * modelViewMatrix * vec4(newPos, 1.0);
+-@@ -101,12 +110,18 @@ varying float vWater;
+- varying vec3 vWPos;
+- varying vec3 vWN;
+- varying float vLand;
+-+varying float vH;
+-+varying float vCoast;
+-+varying float vShore;
+- uniform float uTime;
+- uniform float uDayF;
+- uniform float uGlow;
+- uniform vec3 uSunDir;
+- uniform vec3 uFogColor;
+- uniform float uFogDensity;
+-+uniform vec2 uWind; // Step B：泡沫顺风拉丝用风向（uniforms 本就有，FRAG 补声明）
+-+uniform sampler2D uHeightTex; // Step C1：烘焙高度图（512²，uv = xz/9200+0.5）
+-+uniform vec3 uMoonDir; // Step C3：月光方向（地形月夜漫反射 + 水面月路）
+- 
+- float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+- float vnoise(vec2 p){
+-@@ -151,6 +166,25 @@ vec3 waterNormal(vec2 p) {
+-   return normalize(n);
+- }
+- 
+-+// —— 地形投影（Step C1）：沿太阳方向 march 高度图 ——
+-+// 10 步、近密远疏（40m→~3000m），软半影；返回 1=全亮、0=全影。
+-+// 调用方以 shadowAmt 按太阳高度连续渐隐；域外视为无遮挡。
+-+float terrainShadow(vec3 p, vec3 sunDir) {
+-+  float res = 1.0;
+-+  float t = 40.0;
+-+  for (int i = 0; i < 10; i++) {
+-+    vec3 tp = p + sunDir * t;
+-+    vec2 suv = tp.xz / 9200.0 + 0.5;
+-+    if (suv.x > 0.001 && suv.x < 0.999 && suv.y > 0.001 && suv.y < 0.999) {
+-+      float th = texture2D(uHeightTex, suv).r;
+-+      res = min(res, 8.0 * (tp.y - th + 1.5) / t);
+-+    }
+-+    t *= 1.55;
+-+  }
+-+  float sh = clamp(res, 0.0, 1.0);
+-+  return sh * sh * (3.0 - 2.0 * sh);
+-+}
+-+
+- void main() {
+-   float night = 1.0 - uDayF;
+-   vec3 V = normalize(cameraPosition - vWPos);
+-@@ -164,6 +198,10 @@ void main() {
+-   // 浪尖层次：片元内用解析波高现算（摆脱顶点网格 → 消除条带/格子感）
+-   float wh = waveHeight(vWPos.xz);
+-   float crest = smoothstep(0.25, 0.85, wh); // 归一化波高 → 0..1 浪尖
+-+  // Step B1：打散浪尖云斑 —— 高频 breakup 把正弦干涉的 200m+ 亮斑撕碎，
+-+  // 提亮不同步下调（0.55→0.42），海面不再“长癣”
+-+  float breakup = fbm(vWPos.xz * 0.020 + vec2(uTime * 0.05, -uTime * 0.03));
+-+  crest *= 0.45 + 0.55 * smoothstep(0.25, 0.75, breakup);
+- 
+-   // —— Fresnel 菲涅尔：贴水面反射天空；用「面朝上」gate 掉陡岸坡发白 ——
+-   float upness = smoothstep(0.36, 0.72, N.y);
+-@@ -173,11 +211,17 @@ void main() {
+-   // 参照用户原图：海底深青黑，浪尖点缀青白，整体暗、不刺眼。
+-   vec3 deepCol  = mix(vec3(0.008, 0.022, 0.038), vec3(0.050, 0.115, 0.185), uDayF); // 浪谷（深青黑）
+-   vec3 shallowCol = mix(vec3(0.024, 0.055, 0.082), vec3(0.150, 0.310, 0.420), uDayF); // 浪尖（低饱和青蓝）
+--  vec3 waterCol = mix(deepCol, shallowCol, crest * 0.66);
+-+  vec3 waterCol = mix(deepCol, shallowCol, crest * 0.42);
+- 
+-   // 天空反射：低饱和灰青蓝（白天）→ 近黑（夜），权重压低避免整片洗灰
+-   vec3 skyRef = mix(vec3(0.014, 0.032, 0.054), vec3(0.150, 0.290, 0.385), uDayF);
+--  waterCol = mix(waterCol, skyRef, clamp(fres, 0.0, 1.0) * (0.055 + 0.085 * uDayF));
+-+  waterCol = mix(waterCol, skyRef, clamp(fres, 0.0, 1.0) * (0.045 + 0.07 * uDayF));
+-+
+-+  // —— 近岸透色（Step B-2）：0→450m 从透沙青玉渐变到深海藏青 ——
+-+  // 环岸/环岛/环峡湾自动出现；机组区（>800m）恒为深海，不受影响
+-+  float shalT = 1.0 - smoothstep(0.0, 450.0, vShore);
+-+  vec3 shalCol = mix(vec3(0.030, 0.075, 0.105), vec3(0.135, 0.330, 0.345), uDayF);
+-+  waterCol = mix(waterCol, shalCol, shalT * (0.20 + 0.45 * uDayF) * step(0.5, vWater));
+- 
+-   // —— 太阳/月亮镜面高光：细碎点状波光（点状，克制，不高亮成云斑）——
+-   vec3 halfV = normalize(V + uSunDir);
+-@@ -185,46 +229,177 @@ void main() {
+-   float sparkle = fbm(vWPos.xz * 0.12 + uTime * 0.8) * fbm(vWPos.xz * 0.35 - uTime * 0.5);
+-   spec *= (0.10 + 0.90 * sparkle);
+-   vec3 sunCol = mix(vec3(0.11, 0.26, 0.38), vec3(0.80, 0.80, 0.78), uDayF);
+--  waterCol += sunCol * spec * (uDayF * 0.9 + night * 0.16);
+--
+--  // —— 波峰泡沫：只在 crest，且提频打散成细碎稀疏浪花（克制；避免大块云斑）——
+--  float foamNoise = fbm(vWPos.xz * 0.075 + uTime * 0.06 + crest * 3.0);
+--  float foamMask = smoothstep(0.66, 0.98, crest) * (0.10 + 0.60 * smoothstep(0.58, 0.86, foamNoise));
+-+  waterCol += sunCol * spec * (uDayF * 0.72 + night * 0.13);
+-+
+-+  // —— 波峰泡沫（Step B2）：顺风拉丝 + 米级碎点 + 三重稀疏门 ——
+-+  // 各向异性坐标把各向同性云斑拉成风纹碎浪，随风漂移；只在最碎的浪尖出现
+-+  vec2 wdirF = normalize(uWind + vec2(0.0001, 0.0));
+-+  vec2 wperpF = vec2(-wdirF.y, wdirF.x);
+-+  float alongW = dot(vWPos.xz, wdirF);
+-+  float acroW = dot(vWPos.xz, wperpF);
+-+  float foamStreak = fbm(vec2(alongW * 0.045 - uTime * 0.25, acroW * 0.20) + crest * 2.0);
+-+  float foamFleck = vnoise(vWPos.xz * 0.9 + uTime * 0.4); // 米级碎点
+-+  float foamMask = smoothstep(0.78, 0.97, crest)
+-+    * smoothstep(0.55, 0.85, foamStreak)
+-+    * (0.35 + 0.65 * smoothstep(0.55, 0.9, foamFleck));
+-   vec3 foam = mix(vec3(0.028, 0.06, 0.09), vec3(0.50, 0.63, 0.68), uDayF); // 更低饱淡青白
+--  waterCol = mix(waterCol, foam, foamMask * (0.08 + uDayF * 0.18));
+--
+--  // —— 夜间暗潮微光：极弱青蓝涌动 ——
+--  float moonSpec = pow(max(dot(Ns, halfV), 0.0), 220.0);
+--  waterCol += vec3(0.05, 0.13, 0.20) * moonSpec * night * uGlow * 0.30;
+--  waterCol += vec3(0.02, 0.06, 0.11) * crest * night * uGlow * 0.40;
+--
+--  // —— 陆地（分带生物群系：近岸黄沙 → 内陆森林 → 远山），与海面形成强对比 ——
+--  // 用 vLand（0..1，向陆地线性增大）作为「离海岸远近」的代理：
+--  //   vLand ∈ (0, 0.16)：沙带；vLand ∈ (0.14, 0.62)：森林；vLand > 0.55：远山。
+--  float sandMask  = 1.0 - smoothstep(0.06, 0.17, vLand);            // 近岸沙带(只在低land)
+--  float forestMask = smoothstep(0.12, 0.26, vLand) * (1.0 - smoothstep(0.60, 0.80, vLand));
+--  float mtnMask   = smoothstep(0.55, 0.85, vLand);                 // 内陆远山
+--
+--  // 沙：低饱和暖黄（克制、不刺眼的黄褐），白天亮、夜里压暗
+--  vec3 sandCol = mix(vec3(0.075, 0.058, 0.036), vec3(0.40, 0.34, 0.20), uDayF);
+--  // 森林：低饱和冷绿（莫兰迪），白天呈现灰绿林地
+--  vec3 forestCol = mix(vec3(0.035, 0.055, 0.044), vec3(0.12, 0.24, 0.15), uDayF);
+--  // 远山：深灰青（大气剪影感，接原有冷调）
+--  vec3 mtnCol = vec3(0.014, 0.030, 0.050) + vec3(0.012, 0.032, 0.055) * uDayF * 0.9;
+-+  waterCol = mix(waterCol, foam, foamMask * (0.03 + uDayF * 0.09));
+-+  // —— 水侧水线（Step B3）：紧贴岸线的海侧碎浪，与陆侧 foamDot 合成完整水线 ——
+-+  // 水像素中 vLand∈(0,0.02) 即岸线外 15~40m；环岸/环岛/环柱自动出现，机组区 vLand=0 不受影响
+-+  float surfBand = smoothstep(0.0, 0.004, vLand) * (1.0 - smoothstep(0.004, 0.02, vLand));
+-+  float surfN = 0.35 + 0.65 * fbm(vWPos.xz * 0.30 + vec2(-uTime * 0.35, uTime * 0.2));
+-+  waterCol = mix(waterCol, foam, surfBand * surfN * (0.10 + uDayF * 0.30) * vWater);
+-+
+-+  // —— 月路（C3）：明月在水面的镜面光路 + 月照涌动 ——
+-+  // 旧版用太阳方向算夜高光，夜里太阳在地平线下故恒≈0（“夜里没光”的另一半根因）
+-+  vec3 halfVM = normalize(V + normalize(uMoonDir));
+-+  float moonSpec = pow(max(dot(Ns, halfVM), 0.0), 220.0);
+-+  waterCol += vec3(0.38, 0.56, 0.70) * moonSpec * night * (0.25 + uGlow) * 1.1;
+-+  waterCol += vec3(0.05, 0.12, 0.18) * crest * night * (0.25 + uGlow) * 0.55;
+-+
+-+  // —— 陆地 v4（六类生物群系 + 岩雪山体，第 32 轮 A）——
+-+  // 与 CPU 端 biomeWeights() 同式；L = vLand（0 海 → 1 内陆）。
+-+  float L = vLand;
+-+  // 岸线破碎（round5）：渲染级高频扰动，沙/潮带按扰动后的 Lp 落位，水线参差 ——
+-+  // CPU 端 biomeWeights 仍用平滑 L（草地散布不需要 40m 级参差），此处分歧是渲染级细节。
+-+  float shoreN = fbm(vWPos.xz * 0.025 + 11.3);
+-+  float Lp = L + (shoreN - 0.5) * 0.16;
+-+  float wSand   = 1.0 - smoothstep(0.06, 0.16, Lp);
+-+  float wTidal  = smoothstep(0.05, 0.12, Lp) * (1.0 - smoothstep(0.16, 0.28, Lp));
+-+  float wGrass  = smoothstep(0.14, 0.30, L) * (1.0 - smoothstep(0.45, 0.62, L));
+-+  float wForest = smoothstep(0.38, 0.55, L) * (1.0 - smoothstep(0.68, 0.82, L));
+-+  float wHill   = smoothstep(0.60, 0.75, L) * (1.0 - smoothstep(0.85, 0.95, L));
+-+  float wMtn    = smoothstep(0.82, 0.93, L);
+-+  float wSandE = pow(wSand, 1.25); float wTidalE = pow(wTidal, 1.25); float wGrassE = pow(wGrass, 1.25);
+-+  float wForestE = pow(wForest, 1.25); float wHillE = pow(wHill, 1.25); float wMtnE = pow(wMtn, 1.25);
+-+  float wSum = wSandE + wTidalE + wGrassE + wForestE + wHillE + wMtnE + 1e-5;
+-+  wSand = wSandE / wSum; wTidal = wTidalE / wSum; wGrass = wGrassE / wSum;
+-+  wForest = wForestE / wSum; wHill = wHillE / wSum; wMtn = wMtnE / wSum;
+-+
+-+  // 日间群系色（A-round2：拉开色相/明度距离，分层可辨；仍压住饱和，克制不刺眼）
+-+  vec3 cSand   = vec3(0.450, 0.360, 0.240); // 干沙（暖亮）
+-+  vec3 cTidal  = vec3(0.160, 0.130, 0.090); // 潮间湿沙（深，湿润感）
+-+  vec3 cGrass  = vec3(0.135, 0.235, 0.095); // 草原（压暗，远观不晃眼）
+-+  vec3 cForest = vec3(0.070, 0.160, 0.100); // 林地（深绿）
+-+  vec3 cHill   = vec3(0.230, 0.200, 0.130); // 缓丘（棕橄榄，与林地区分）
+-+  vec3 cRock   = vec3(0.110, 0.120, 0.140); // 山岩（深灰）
+-+
+-+  // 细节噪声：草原/林地高频斑驳、沙粒微粒、山岩分形
+-+  float g1 = vnoise(vWPos.xz * 0.020);
+-+  float g2 = vnoise(vWPos.xz * 0.055 + 7.3);
+-+  float grassN = g1 * 0.65 + g2 * 0.35;
+-+  float sandN = vnoise(vWPos.xz * 0.11 + 3.1);
+-+  float rockN = fbm(vWPos.xz * 0.008 + 1.7);
+-+  float ribs = fbm(vec2(vWPos.x * 0.020 + vWPos.z * 0.013, vWPos.z * 0.031 - vWPos.x * 0.007)); // 沟脊（雪沟/岩脊/AO共用）
+-+  float crownN = g1 * 0.5 + fbm(vWPos.xz * 0.030) * 0.5;
+-+
+-+  vec3 landDay = cSand * (0.92 + 0.16 * sandN) * wSand
+-+               + cTidal * wTidal
+-+               + cGrass * (0.78 + 0.44 * grassN) * wGrass
+-+               + cForest * (0.78 + 0.44 * crownN) * wForest
+-+               + cHill * (0.85 + 0.30 * rockN) * wHill
+-+               + cRock * (0.80 + 0.40 * rockN) * wMtn;
+-+  // 陆地起伏漫反射（只作用陆地；雪有自己的日光模型，不在此重复压暗）
+-+  float landDiff = 0.70 + 0.30 * clamp(dot(N, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
+-+  landDay *= mix(1.0, landDiff, 1.0 - vWater);
+-+  // 湿沙带：紧贴水线压暗（退潮湿润感），只作用沙/潮带 —— 岸线“镶边”，破画笔渐变
+-+  float wetBand = (1.0 - smoothstep(0.015, 0.10, Lp)) * clamp(wSand + wTidal, 0.0, 1.0);
+-+  landDay *= 1.0 - wetBand * 0.45;
+-+
+-+  // —— 细节法线（round4）：高频起伏扰动，只用于雪/岩光照，制造嶙峋光影 ——
+-+  float eD = 6.0;
+-+  float dHx = fbm(vWPos.xz * 0.045 + 3.7) - fbm(vWPos.xz * 0.045 - vec2(eD * 0.045, 0.0) + 3.7);
+-+  float dHz = fbm(vWPos.xz * 0.045 + 3.7) - fbm(vWPos.xz * 0.045 - vec2(0.0, eD * 0.045) + 3.7);
+-+  vec3 Ndet = normalize(N + vec3(-dHx * 2.2, 0.0, -dHz * 2.2));
+-+  // 微起伏（round8）：米级地表凹凸进法线，近看有“颗粒”，远处衰减防闪烁
+-+  float camDist = length(cameraPosition - vWPos);
+-+  float microFade = exp(-camDist / 380.0);
+-+  if (microFade > 0.01) {
+-+    float m1 = fbm(vWPos.xz * 0.55 + 7.1);
+-+    float m2 = fbm(vWPos.xz * 0.55 + vec2(2.5, 0.0) + 7.1);
+-+    float m3 = fbm(vWPos.xz * 0.55 + vec2(0.0, 2.5) + 7.1);
+-+    Ndet = normalize(Ndet + vec3((m1 - m2) * 1.6, 0.0, (m1 - m3) * 1.6) * microFade);
+-+  }
+-+  float fade2 = exp(-camDist / 500.0); // 反照率微细节衰减（比法线稍远）
+-+
+-+  // 山脊裸岩：坡陡处露出山岩（细节法线让岩壁有明暗皴擦，谷地留绿）
+-+  float steep = 1.0 - Ndet.y;
+-+  float rockExp = smoothstep(0.42, 0.72, steep) * clamp(wHill + wMtn, 0.0, 1.0);
+-+  landDay = mix(landDay, cRock * (0.85 + 0.30 * rockN), clamp(rockExp, 0.0, 1.0) * 0.85);
+-+
+-+  // —— 雪冠 v2（round4）：岩脊雪沟 + 日光质感，告别“盐堆” ——
+-+  // 沟留雪、脊露岩：高频脊线 + 雪线扰动打破“一刀切”（雪线 380/460，与 CPU SNOW_LINE 同值）
+-+  float snow = smoothstep(380.0, 460.0, vH + (ribs - 0.5) * 90.0);
+-+  float slopeGate = smoothstep(0.35, 0.70, Ndet.y); // 陡壁挂不住雪（窄脊主峰正需要）
+-+  float ribGate = 0.50 + 0.50 * smoothstep(0.30, 0.70, ribs); // 沟雪脊岩
+-+  snow *= (0.25 + 0.75 * slopeGate) * ribGate;
+-+  snow *= 0.35 + 0.65 * wMtn;
+-+  float snowM = clamp(snow, 0.0, 1.0);
+-+  // 雪的日光：向阳暖白 / 背阴冷蓝（整块平板白的根因在此）
+-+  float sunDiff = clamp(dot(Ndet, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
+-+  vec3 snowCol = mix(vec3(0.42, 0.50, 0.66), vec3(1.02, 1.00, 0.97), sunDiff);
+-+  // 风蚀纹（sastrugi）：拉伸条纹明暗，近看有“风雕”质感
+-+  float sast = fbm(vec2((vWPos.x + vWPos.z) * 0.06, (vWPos.x - vWPos.z) * 0.012));
+-+  snowCol *= 0.88 + 0.24 * sast;
+-+  // 雪晶闪光：只在向阳面星星点点（白天反光强度的来源，克制）
+-+  vec3 Vv = normalize(cameraPosition - vWPos);
+-+  vec3 Hv = normalize(Vv + uSunDir);
+-+  float glint = pow(max(dot(Ndet, Hv), 0.0), 60.0);
+-+  float glintN = fbm(vWPos.xz * 0.12 + uTime * 0.05);
+-+  snowCol += vec3(1.0, 0.98, 0.94) * glint * smoothstep(0.50, 0.9, glintN) * uDayF * 4.0 * sunDiff;
+-+  landDay = mix(landDay, snowCol, snowM);
+-+  // 岩石质感（round5）：层理 + 碎石颗粒 + 凹缝 AO，杀“塑料黏土”；
+-+  // round10 起只给高山 + 陡壁（丘陵带保持干净植被，不再整片压灰）
+-+  float strata = sin(vH * 0.33 + rockN * 5.0 + Ndet.x * 2.0);
+-+  float rockGrain = vnoise(vWPos.xz * 0.06) * 0.6 + vnoise(vWPos.xz * 0.17 + 4.2) * 0.4;
+-+  float crevAO = 0.70 + 0.30 * smoothstep(0.25, 0.75, ribs * 0.5 + rockGrain * 0.5);
+-+  float rockZone = clamp(wMtn + rockExp, 0.0, 1.0);
+-+  float rockTex = (0.88 + 0.12 * strata) * (0.78 + 0.44 * rockGrain) * crevAO;
+-+  landDay *= mix(1.0, rockTex, (1.0 - snowM) * clamp(rockZone, 0.0, 1.0));
+-+  // 微反照率（round8）：厘米~米级地表质感，放大看的本钱；植被（草/树）不管，只做地
+-+  if (fade2 > 0.02) {
+-+    // 沙：风成波纹（定向）+ 散布卵石
+-+    float ripple = sin(dot(vWPos.xz, vec2(0.9, 0.45)) * 2.2 + fbm(vWPos.xz * 0.15) * 9.0);
+-+    float pebble = step(0.965, hash21(floor(vWPos.xz * 2.6) + 1.0));
+-+    float sandZone = clamp(wSand + wTidal, 0.0, 1.0);
+-+    landDay *= 1.0 + (ripple * 0.10 + (fbm(vWPos.xz * 2.3) - 0.5) * 0.25) * sandZone * fade2;
+-+    landDay *= 1.0 - pebble * 0.35 * sandZone * fade2;
+-+    // 草地：丛块浓淡（不是草叶，是地被斑驳；种草另起）
+-+    float tuft = fbm(vWPos.xz * 0.9 + 2.2);
+-+    landDay *= 1.0 + (tuft - 0.5) * 0.35 * clamp(wGrass + wForest * 0.5, 0.0, 1.0) * fade2;
+-+    // 岩：裂隙网（深色脉）+ 碎石灰点
+-+    float crack = 1.0 - abs(2.0 * fbm(vWPos.xz * 0.33 + 5.5) - 1.0);
+-+    crack = pow(crack, 3.0);
+-+    float scree = step(0.975, hash21(floor(vWPos.xz * 3.1) + 7.0));
+-+    float bareRock = clamp(rockZone, 0.0, 1.0) * (1.0 - snowM);
+-+    landDay *= 1.0 - crack * 0.40 * bareRock * fade2;
+-+    landDay *= 1.0 + scree * 0.30 * bareRock * fade2;
+-+    // 水线：泡沫碎点（陆侧水线镶边，水体泡沫归 Step B）
+-+    float foamDot = step(0.93, hash21(floor(vWPos.xz * 1.4) + 3.0)) * (1.0 - smoothstep(0.005, 0.05, Lp));
+-+    landDay = mix(landDay, vec3(0.75, 0.82, 0.84), foamDot * 0.7 * fade2);
+-+  }
+- 
+-   float lm = vnoise(vWPos.xz * 0.0021);
+-   lm += 0.5 * vnoise(vWPos.xz * 0.0055);
+--  // 森林纹理：细碎树冠斑驳（高频）、低饱和
+--  float forestN = vnoise(vWPos.xz * 0.012);
+--  forestN += 0.5 * vnoise(vWPos.xz * 0.030);
+--
+--  vec3 landCol = mtnCol;
+--  // 森林在台地，沙在近岸，两者在各自带内叠加
+--  landCol = mix(landCol, forestCol * (0.82 + 0.28 * forestN), forestMask * 0.9);
+--  landCol = mix(landCol, sandCol * (0.9 + 0.2 * vnoise(vWPos.xz * 0.02)), sandMask * 0.9);
+--  landCol += (lm - 0.5) * 0.04;                    // 微弱整体斑驳
+-+
+-+  // 昼夜：夜间统一压暗（保留冷调），白天补微弱冷光
+-+  vec3 landCol = landDay * mix(vec3(0.19, 0.20, 0.23), vec3(1.0), uDayF);
+-+  // —— 月夜漫反射（C3）：月光给山体塑形，背阳面留天光底不死黑（包裹漫反射）——
+-+  float moonDiff = clamp(dot(N, normalize(uMoonDir)) * 0.5 + 0.5, 0.0, 1.0);
+-+  landCol += vec3(0.30, 0.42, 0.58) * moonDiff * night * 0.35;
+-+  landCol += (lm - 0.5) * 0.04;                        // 微弱整体斑驳
+-   landCol += vec3(0.012, 0.040, 0.060) * uDayF * 0.45; // 白天冷调补光
+- 
+-+  // —— 投影落位（Step C1/C2）：只作用陆地；影里留 30% 天光 + 透冷调 ——
+-+  // C2：①加重（0.38→0.30）；②随太阳高度渐显渐隐 —— 日出日落阴影淡入淡出。
+-+  // 硬门限（uSunDir.y>0.02）是昼夜交替“啪”地开关的根因，改连续 fade。
+-+  float shadowAmt = smoothstep(-0.01, 0.10, uSunDir.y) * step(0.005, uDayF);
+-+  if (vWater < 0.5 && shadowAmt > 0.002) {
+-+    float sh = terrainShadow(vWPos, uSunDir);
+-+    landCol *= mix(1.0, mix(0.30, 1.0, sh), shadowAmt);
+-+    landCol += vec3(0.010, 0.025, 0.045) * (1.0 - sh) * uDayF * shadowAmt; // 阴影透天光冷调
+-+  }
+-+
+-   vec3 col = mix(landCol, waterCol, vWater);
+- 
+-   // —— 空气透视（指数雾）：海水轻吃雾保色，远山吃雾显空气感 ——
+-@@ -240,21 +415,37 @@ void main() {
+- export default function WorldTerrain() {
+-   const { geo, mat } = useMemo(() => {
+-     const SIZE = 9200
+--    const SEG = 300
+-+    const SEG = 400 // round8：23m 单元（160k 顶点，启动多 ~2s，换近岸轮廓）
+-     const g = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG)
+-     g.rotateX(-Math.PI / 2)
+-     const pos = g.attributes.position as THREE.BufferAttribute
+-     const land = new Float32Array(pos.count)
+-+    const coast = new Float32Array(pos.count)
+-+    const shore = new Float32Array(pos.count)
+-     for (let i = 0; i < pos.count; i++) {
+-       const x = pos.getX(i)
+-       const z = pos.getZ(i)
+-       const y = terrainSurfaceY(x, z)
+-       pos.setY(i, y)
+-       land[i] = landMask(x, z)
+-+      coast[i] = coastT(x, z)
+-+      shore[i] = shoreDistance(x, z)
+-     }
+-     g.setAttribute('aLand', new THREE.BufferAttribute(land, 1))
+-+    g.setAttribute('aCoast', new THREE.BufferAttribute(coast, 1))
+-+    g.setAttribute('aShore', new THREE.BufferAttribute(shore, 1))
+-     g.computeVertexNormals()
+- 
+-+    // Step C1 高度纹理：512² 烘焙（半浮点线性过滤；R16F WebGL2 可过滤，无需扩展）
+-+    const hg = bakeHeightGrid(512, SIZE)
+-+    const hdata = new Uint16Array(hg.size * hg.size)
+-+    for (let k = 0; k < hdata.length; k++) hdata[k] = THREE.DataUtils.toHalfFloat(hg.data[k])
+-+    const htex = new THREE.DataTexture(hdata, hg.size, hg.size, THREE.RedFormat, THREE.HalfFloatType)
+-+    htex.magFilter = THREE.LinearFilter
+-+    htex.minFilter = THREE.LinearFilter
+-+    htex.wrapS = htex.wrapT = THREE.ClampToEdgeWrapping
+-+    htex.needsUpdate = true
+-+
+-     const u = {
+-       uTime: { value: 0 },
+-       uWind: { value: new THREE.Vector2(0, 1) },
+-@@ -263,7 +454,9 @@ export default function WorldTerrain() {
+-       uGlow: { value: 1 },
+-       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+-       uFogColor: { value: new THREE.Color('#040911') },
+--      uFogDensity: { value: 0.00022 },
+-+      uFogDensity: { value: 0.00013 }, // C4：默认值随 App 场景雾（逐帧覆盖，此处仅首帧）
+-+      uHeightTex: { value: htex },
+-+      uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
+-     }
+- 
+-     const m = new THREE.ShaderMaterial({
+-@@ -275,7 +468,7 @@ export default function WorldTerrain() {
+-       depthWrite: true,
+-       fog: false,
+-     })
+--    m.customProgramCacheKey = () => 'terrain-ocean-v3'
+-+    m.customProgramCacheKey = () => 'terrain-ocean-v4'
+-     ;(m.userData as any).u = u
+-     return { geo: g, mat: m }
+-   }, [])
+-@@ -287,6 +480,7 @@ export default function WorldTerrain() {
+-       uDayF: { value: number }
+-       uGlow: { value: number }
+-       uSunDir: { value: THREE.Vector3 }
+-+      uMoonDir: { value: THREE.Vector3 }
+-       uFogColor: { value: THREE.Color }
+-       uFogDensity: { value: number }
+-     }
+-@@ -299,6 +493,7 @@ export default function WorldTerrain() {
+-     uu.uGlow.value = dayF * 0.6 + night * nightGlow
+-     uu.uDayF.value = dayF
+-     uu.uSunDir.value.copy(skyState.sunDir)
+-+    uu.uMoonDir.value.copy(skyState.moonDir)
+-     const { fromDeg } = windAt(useSim.getState().tHours)
+-     const th = (fromDeg * Math.PI) / 180
+-     uu.uWind.value.set(Math.sin(th), Math.cos(th))
+-diff --git a/twin/src/scene/grassField.tsx b/twin/src/scene/grassField.tsx
+-index c4ebcd2..66a26d1 100644
+---- a/twin/src/scene/grassField.tsx
+-+++ b/twin/src/scene/grassField.tsx
+-@@ -1,15 +1,195 @@
+--import { useMemo } from 'react'
+-+import { useMemo, useRef } from 'react'
+-+import { useFrame } from '@react-three/fiber'
+- import * as THREE from 'three'
+-+import { terrainSurfaceY, landMask, biomeWeights, mulberry32 } from './terrainUtil'
+-+
+-+// ============================================================
+-+// 草地系统真实核心（第 32 轮 A 新建：暂不挂载，Step A 只做"有"，看数、看线框）
+-+// ------------------------------------------------------------
+-+//  · 6 万实例 blade 交叉面片：草原带 4 万 + 林下 2 万（拒绝采样，按 biomeWeights 落位）；
+-+//  · 顶点摆动（正弦风场 + 相位抖动，攒动感来自相位差而非大幅位移）；
+-+//  · 干湿分区染色（世界坐标噪声：干黄 ↔ 湿绿；林下偏暗黄绿）；
+-+//  · 光照只做「方向光漫反射近似 + 高度渐变 + 指数雾」，不吃 PBR、不吃阴影；
+-+//  · 挂载前需在 TwinScene 中 <GrassField/>（当前未挂载，R32 不进入渲染帧）。
+-+// 注意：本文件只消费 terrainUtil 纯函数（terrainSurfaceY/landMask/biomeWeights），
+-+//       不反向影响地形 mesh 与贴地基准。
+-+// ============================================================
+-+
+-+const GRASS_COUNT = 40000
+-+const FLOOR_COUNT = 20000
+-+
+-+const VERT = /* glsl */ `
+-+attribute vec3 aOffset;   // 世界落位（根部）
+-+attribute vec3 aParam;    // x: 缩放 s, y: 相位, z: 朝向角
+-+attribute float aKind;    // 0 草原 blade, 1 林下 blade
+-+uniform float uTime;
+-+uniform vec2 uWind;
+-+varying float vShade;
+-+varying float vKind;
+-+varying float vFogDepth;
+-+varying float vDry;
+-+
+-+float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+-+
+-+void main() {
+-+  float s = aParam.x;
+-+  float phase = aParam.y;
+-+  float ang = aParam.z;
+-+  float c = cos(ang), si = sin(ang);
+-+  // 局部 blade：position.x ∈ [-0.5,0.5]（宽）, position.y ∈ [0,1]（高，基底已抬到 0）
+-+  vec3 p = position;
+-+  p.x *= (1.0 - uv.y * 0.85);          // 向上收窄成 blade
+-+  p = vec3(p.x * c, p.y, -p.x * si + p.z * c);
+-+  // 风摆：顶部摆幅大、根部不动；相位差制造攒动
+-+  float sway = sin(uTime * 1.35 + phase + dot(aOffset.xz, uWind) * 0.02);
+-+  float sway2 = sin(uTime * 2.30 + phase * 1.7);
+-+  float bendAmt = uv.y * uv.y * s;
+-+  p.x += (sway * 0.35 + sway2 * 0.08) * bendAmt;
+-+  p.z += (sway * 0.22 - sway2 * 0.06) * bendAmt;
+-+  vec3 world = aOffset + p * vec3(s * 0.55, s, s * 0.55);
+-+  // 干湿分区（与片元同式，各自算一份避免 varying 精度问题可接受，此处只做明暗）
+-+  float dry = hash21(floor(aOffset.xz * 0.05));
+-+  vDry = dry;
+-+  vKind = aKind;
+-+  // 高度渐变：根暗、梢亮；叠加摆动微光
+-+  vShade = (0.45 + 0.55 * uv.y) * (0.92 + 0.08 * sway);
+-+  vec4 mv = modelViewMatrix * vec4(world, 1.0);
+-+  vFogDepth = -mv.z;
+-+  gl_Position = projectionMatrix * mv;
+-+}
+-+`
+-+
+-+const FRAG = /* glsl */ `
+-+precision highp float;
+-+varying float vShade;
+-+varying float vKind;
+-+varying float vFogDepth;
+-+varying float vDry;
+-+uniform float uDayF;
+-+uniform vec3 uFogColor;
+-+uniform float uFogDensity;
+-+
+-+void main() {
+-+  // 干(黄) ↔ 湿(绿)；林下整体压暗偏黄
+-+  vec3 dryCol = mix(vec3(0.30, 0.26, 0.10), vec3(0.20, 0.17, 0.07), vKind);
+-+  vec3 wetCol = mix(vec3(0.10, 0.24, 0.08), vec3(0.07, 0.15, 0.07), vKind);
+-+  vec3 col = mix(wetCol, dryCol, smoothstep(0.35, 0.75, vDry));
+-+  col *= vShade;
+-+  // 昼夜：只保留方向光漫反射近似的明暗比例
+-+  col *= mix(vec3(0.16, 0.18, 0.24), vec3(1.0), uDayF);
+-+  // 指数雾（与场景雾同式）
+-+  float fogF = 1.0 - exp(-uFogDensity * uFogDensity * vFogDepth * vFogDepth);
+-+  col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
+-+  gl_FragColor = vec4(col, 1.0);
+-+}
+-+`
+-+
+-+interface GrassSet {
+-+  geo: THREE.InstancedBufferGeometry
+-+  mat: THREE.ShaderMaterial
+-+  count: number
+-+}
+-+
+-+function buildSet(kind: 0 | 1, count: number, seed: number): GrassSet {
+-+  // 基底：两块交叉竖面（1×1，基底 y=0）
+-+  const p1 = new THREE.PlaneGeometry(1, 1)
+-+  p1.translate(0, 0.5, 0)
+-+  const p2 = new THREE.PlaneGeometry(1, 1)
+-+  p2.rotateY(Math.PI / 2)
+-+  p2.translate(0, 0.5, 0)
+-+  const base = new THREE.BufferGeometry()
+-+  const posArr: number[] = []
+-+  const uvArr: number[] = []
+-+  const idxArr: number[] = []
+-+  let vi = 0
+-+  for (const p of [p1, p2]) {
+-+    const pp = p.attributes.position as THREE.BufferAttribute
+-+    const uu = p.attributes.uv as THREE.BufferAttribute
+-+    const ii = p.index as THREE.BufferAttribute
+-+    for (let i = 0; i < pp.count; i++) {
+-+      posArr.push(pp.getX(i), pp.getY(i), pp.getZ(i))
+-+      uvArr.push(uu.getX(i), uu.getY(i))
+-+    }
+-+    for (let i = 0; i < ii.count; i++) idxArr.push(ii.getX(i) + vi)
+-+    vi += pp.count
+-+  }
+-+  base.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3))
+-+  base.setAttribute('uv', new THREE.Float32BufferAttribute(uvArr, 2))
+-+  base.setIndex(idxArr)
+-+
+-+  const geo = new THREE.InstancedBufferGeometry()
+-+  geo.attributes.position = base.attributes.position
+-+  geo.attributes.uv = base.attributes.uv
+-+  geo.setIndex(base.getIndex())
+-+  geo.instanceCount = count
+-+
+-+  const offsets = new Float32Array(count * 3)
+-+  const params = new Float32Array(count * 3)
+-+  const kinds = new Float32Array(count)
+-+  const rnd = mulberry32(seed)
+-+  let placed = 0
+-+  let guard = 0
+-+  while (placed < count && guard < count * 60) {
+-+    guard++
+-+    const x = (rnd() * 2 - 1) * 4550
+-+    const z = (rnd() * 2 - 1) * 4550
+-+    const L = landMask(x, z)
+-+    if (L < 0.05) continue
+-+    const w = biomeWeights(x, z)
+-+    const key = kind === 0 ? w.grass : w.forest
+-+    if (rnd() > key) continue
+-+    const y = terrainSurfaceY(x, z)
+-+    offsets[placed * 3] = x
+-+    offsets[placed * 3 + 1] = y - 0.15 // 根部微埋，避免悬空
+-+    offsets[placed * 3 + 2] = z
+-+    const s = kind === 0 ? 1.1 + rnd() * 1.2 : 0.7 + rnd() * 0.8
+-+    params[placed * 3] = s
+-+    params[placed * 3 + 1] = rnd() * Math.PI * 2
+-+    params[placed * 3 + 2] = rnd() * Math.PI
+-+    kinds[placed] = kind
+-+    placed++
+-+  }
+-+  geo.instanceCount = placed
+-+  geo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(offsets, 3))
+-+  geo.setAttribute('aParam', new THREE.InstancedBufferAttribute(params, 3))
+-+  geo.setAttribute('aKind', new THREE.InstancedBufferAttribute(kinds, 1))
+-+
+-+  const mat = new THREE.ShaderMaterial({
+-+    vertexShader: VERT,
+-+    fragmentShader: FRAG,
+-+    uniforms: {
+-+      uTime: { value: 0 },
+-+      uWind: { value: new THREE.Vector2(0.8, 0.6) },
+-+      uDayF: { value: 1 },
+-+      uFogColor: { value: new THREE.Color('#040911') },
+-+      uFogDensity: { value: 0.00013 }, // C4：默认值随 App 场景雾
+-+    },
+-+    side: THREE.DoubleSide,
+-+  })
+-+  mat.customProgramCacheKey = () => 'grass-blade-v1'
+-+  return { geo, mat, count: placed }
+-+}
+- 
+--// R33 v15 · sphere 复测（控制组）
+- export default function GrassField() {
+--  const sphere = useMemo(() => {
+--    const g = new THREE.SphereGeometry(50, 32, 16)
+--    const m = new THREE.MeshBasicMaterial({ color: 0xff0000 })
+--    const mesh = new THREE.Mesh(g, m)
+--    mesh.position.set(0, 50, 0)
+--    return mesh
+--  }, [])
+-+  const grass = useMemo(() => buildSet(0, GRASS_COUNT, 1337), [])
+-+  const floor = useMemo(() => buildSet(1, FLOOR_COUNT, 7331), [])
+-+  const ref = useRef<THREE.Group>(null)
+-+
+-+  useFrame((state) => {
+-+    const t = state.clock.elapsedTime
+-+    for (const s of [grass, floor]) {
+-+      const u = s.mat.uniforms as Record<string, { value: unknown }>
+-+      ;(u.uTime as { value: number }).value = t
+-+    }
+-+  })
+- 
+--  return <primitive object={sphere} />
+-+  // 未挂载验证用：如需看数可临时在 TwinScene 挂 <GrassField/>（R32 默认不挂）
+-+  return (
+-+    <group ref={ref}>
+-+      <mesh geometry={grass.geo} material={grass.mat} frustumCulled={false} />
+-+      <mesh geometry={floor.geo} material={floor.mat} frustumCulled={false} />
+-+    </group>
+-+  )
+- }
+-+
+-+
+-diff --git a/twin/src/scene/terrainUtil.ts b/twin/src/scene/terrainUtil.ts
+-index b2bd539..253729a 100644
+---- a/twin/src/scene/terrainUtil.ts
+-+++ b/twin/src/scene/terrainUtil.ts
+-@@ -42,35 +42,287 @@ const smoothstep = (e0: number, e1: number, x: number) => {
+-   return t * t * (3 - 2 * t)
+- }
+- 
+--// ---- 地形：开放外海 + 两相邻侧陆地（第 31 轮重构：用户验收回访）----
+--// 第 29/30 轮的「以场心为圆心的径向海盆」被用户判为「盆地/湖泊，不是海」：
+--//  四周全是等高海岸山脉，把海围成一口碗。本轮把世界改成「开放外海」——
+--//  · 南(+z)、东(+x) 两【相邻侧】完全开放为纯海，海面一路延伸至世界边缘（无岸）；
+--//  · 北(-z)、西(-x) 两【相邻侧】为陆地，海岸线带噪声蜿蜒（曲折包裹）；
+--//  · 全部 9 机与升压站仍位于海中央、距海岸遥远（贴海平台）；
+--//  · 海床只保留极低幅微地貌（±2m），贴地稳定、贴近真实海平台。
+-+// ---- 地形：开放外海 + 两相邻侧陆地（第 32 轮 A-round3：复杂地貌奇观）----
+-+// 第 31 轮的海岸是单层 fbm 直线切割带（wobble ±320m），岬湾尺度单一；
+-+// 本轮升级为「7 层噪声蜿蜒 + 大小高斯弧岬湾 + 双侧钳制 + 不规则离岸群岛/海岬」——
+-+//  · 海域张角 100°（西岸线绕北角向南偏东 10°，不再是横平竖直的 90°）；
+-+//  · 南(+z)、东(+x) 两【相邻侧】仍完全开放为纯海（无岸）；
+-+//  · 北(-z)、西(-x) 为陆地，海岸线多尺度曲折（50m 微齿 ~ 3km 大岬湾）；
+-+//  · 全部 9 机与升压站仍位于海中央（600m 机组净距硬约束，见 cap/bayCap）；
+-+//  · 内陆远山加高锐化（300~550m 奇崛山体，雪冠载体更大）；
+-+//  · 主峰直插云霄（1100m 级）+ 域扭曲山脊谷地 + 丘陵盆地；
+-+//  · 峡湾水道深切北岸（长 1.6km、宽 220~560m，两壁陡峭，海岬变湾中岛）；
+-+//  · 海蚀柱群（离岸峭岩，浪蚀奇观）；
+-+//  · 海床仍只保留极低幅微地貌（±2m），贴地稳定。
+-+// 注：R32-R34 系回退后重做（见 twin/docs/research/R32-R34-改造提示词.md），
+-+//     因原 commit 不在本快照内，函数名与原实现未必逐字一致，但几何约束等价。
+- /** 海上风电场中心（保持旧取景重心；本版地形不再以之为圆心） */
+- export const FARM_CENTER = { x: -100, z: -640 } as const
+- 
+--/** 北向(-z)海岸线基准（-z 大于此值才进入陆地；越往北越高） */
+--const COAST_N = 1720
+--/** 西向(-x)海岸线基准（-x 大于此值才进入陆地；越往西越高） */
+--const COAST_W = 1420
+--/** 海岸线蜿蜒噪声幅度（让岸边曲折，而非直线） */
+--const COAST_WOBBLE = 320
+-+/** 北向(-z)海岸线基准：dNorth = -z + wobbleN(x) - CN0，>0 为陆侧 */
+-+const CN0 = 2100
+-+/** 西向(-x)海岸线基准：dWest = -x + wobbleW(z) - CW0，>0 为陆侧 */
+-+const CW0 = 1750
+-+/** 西岸整体倾角：tan10°，绕北角拐点向南偏东 —— 海域张角由 90° 打开到 100° */
+-+const TILT10 = 0.1763
+-+/** 倾角枢轴 z（北角拐点，与北岸标称衔接） */
+-+const TILT_PIVOT_Z = -2100
+-+/** 海岸抬升基础带宽（round6：520→1400，海滩平原铺开；round7 起实际宽度按位置随机）。
+-+ *  岸线 0 等值线位置不动，机组净距不受影响。 */
+-+export const RAMP_W = 1400
+-+/** 有效过渡带宽（米）：低频噪声分区（0.55~1.55 倍，770~2170m）——
+-+ *  有的岸段短促、有的绵长，坡度和长度都因地而异（round7）。 */
+-+function rampAt(x: number, z: number): number {
+-+  return RAMP_W * (0.5 + 1.1 * N.fbm(x * 0.00035 + 3.3, z * 0.00035 - 8.8, 2))
+-+}
+-+/** 蜿蜒钳制（cap/bayCap）：向陆最多 -380m；向海（bay 侧）北岸 +200 / 西岸 +350 ——
+-+ *  与 CN0/CW0 联立保证：9 机 + 升压站处 landMask ≡ 0，且 600m 环内零沾陆
+-+ *  （实测最近沾陆约 700m＠T09——东南卫星小岛方向，本土岸线更远；
+-+ *  100m 粒度环扫；selftest R32-A1 断言锁定）。 */
+-+const WOB_LAND = -380
+-+const BAYCAP_N = 200
+-+const BAYCAP_W = 350
+-+
+-+/** 5 层噪声蜿蜒基底（fbm 主波 + 次级 + 脊线岬角 + 微细节） */
+-+function wobbleBase(x: number, s: number): number {
+-+  const n5 = N.fbm(x * 0.00058 + s, 40.0, 3) - 0.5
+-+  const n4 = N.fbm(x * 0.0016 + s * 2.1, 7.7, 3) - 0.5
+-+  const n3 = N.ridged(x * 0.0009 + s * 0.7, 21.0, 2) - 0.5
+-+  const n2 = N.fbm(x * 0.0042 + s * 3.7, 3.1, 2) - 0.5
+-+  const n1 = N.fbm(x * 0.009 + s * 5.3, 9.4, 2) - 0.5   // 小岬湾（~110m）
+-+  const n0 = N.fbm(x * 0.021 + s * 7.9, 1.2, 1) - 0.5   // 微齿（~50m）
+-+  return n5 * 2 * 260 + n4 * 2 * 90 + n3 * 2 * 70 + n2 * 2 * 25 + n1 * 2 * 38 + n0 * 2 * 16
+-+}
+-+
+-+/** 北岸蜿蜒：基底 + 高斯弧（西段岬/东段岬/中部湾），再双侧钳制 */
+-+function wobbleN(x: number): number {
+-+  const g1 = Math.exp(-(((x + 1500) / 700) ** 2)) * 220 // 西段岬（向海）
+-+  const g2 = Math.exp(-(((x - 800) / 900) ** 2)) * 260  // 东段岬（向海）
+-+  const bay = Math.exp(-(((x + 200) / 600) ** 2)) * 180 // 中部大湾（向陆收）
+-+  const g3 = Math.exp(-(((x - 300) / 260) ** 2)) * 120  // 东段小岬（向海）
+-+  const bay2 = Math.exp(-(((x - 1300) / 300) ** 2)) * 130 // 东段小湾（向陆收）
+-+  const raw = wobbleBase(x, 5.7) + g1 + g2 + g3 - bay - bay2
+-+  return Math.max(WOB_LAND, Math.min(BAYCAP_N, raw))
+-+}
+-+
+-+/** 西岸蜿蜒：基底 + 高斯弧（北段岬/南段湾），再双侧钳制 */
+-+function wobbleW(z: number): number {
+-+  const g1 = Math.exp(-(((z + 1800) / 800) ** 2)) * 240 // 北段岬（向海）
+-+  const bay = Math.exp(-(((z - 200) / 700) ** 2)) * 200  // 南段大湾（向陆收）
+-+  const g2 = Math.exp(-(((z - 900) / 300) ** 2)) * 130  // 中段小岬（向海）
+-+  const bay2 = Math.exp(-(((z + 800) / 350) ** 2)) * 120 // 北段小湾（向陆收）
+-+  const raw = wobbleBase(z, -3.2) + g1 + g2 - bay - bay2
+-+  return Math.max(WOB_LAND, Math.min(BAYCAP_W, raw))
+-+}
+-+
+-+/** 北岸带符号距离（米，>0 陆侧，<0 海侧）：landMask 与 vCoast 的同一真值 */
+-+export function dNorth(x: number, z: number): number {
+-+  return -z + wobbleN(x) - CN0
+-+}
+-+/** 西岸带符号距离（米，>0 陆侧，<0 海侧）：含整体倾角项（海域张角 100°） */
+-+export function dWest(x: number, z: number): number {
+-+  return -x + wobbleW(z) - CW0 + (z - TILT_PIVOT_Z) * TILT10
+-+}
+-+
+-+/** 离岸地貌：2 主岛 + 2 卫星小岛 + 1 北岸海岬（全部远离机组/电缆/升压站，见 selftest）。
+-+ *  p1/p2/p3 为轮廓角向谐波相位（3/5/8 瓣，±45% 半径起伏）—— 岛不再是正圆，
+-+ *  而是有岬有湾的不规则岛；卫星小岛构成群岛感。 */
+-+export interface CoastFeature { x: number; z: number; r: number; h: number; p1: number; p2: number; p3: number }
+-+export const ISLANDS: CoastFeature[] = [
+-+  { x: 1700, z: 700, r: 260, h: 26, p1: 1.3, p2: 4.1, p3: 2.2 }, // 东南外海大岛（距 T09/电缆走廊 1353m）
+-+  { x: -500, z: 1400, r: 200, h: 20, p1: 5.0, p2: 0.7, p3: 3.3 }, // 南外海小岛（100°倾角后东移，距 T07 约 1400m）
+-+]
+-+/** 卫星小岛（东南大岛附属，纯海中央，与电缆/机组均 >800m） */
+-+export const SATS: CoastFeature[] = [
+-+  { x: 2100, z: 1100, r: 70, h: 9, p1: 2.0, p2: 1.1, p3: 5.4 },
+-+  { x: 1300, z: 300, r: 55, h: 7, p1: 4.4, p2: 2.8, p3: 0.5 },
+-+]
+-+export const HEADLANDS: CoastFeature[] = [
+-+  { x: -1250, z: -2400, r: 480, h: 42, p1: 0, p2: 0, p3: 0 }, // 北岸向南突出的海岬（距 T01 1218m）
+-+]
+-+/** 主峰（直插云霄）+ 次峰：深陆无人区，只做视觉奇观，不触碰任何约束 */
+-+export interface Peak { x: number; z: number; r: number; h: number }
+-+export const PEAKS: Peak[] = [
+-+  { x: -2700, z: -3900, r: 800, h: 780 }, // 主峰（round11：r600→800、h900→780，
+-+  { x: -1600, z: -4200, r: 600, h: 470 }, // 次峰（同上）—— 宽肩缓脊，合计仍 1000m 级，
+-+]                                         // 不再是“插在地上”的针，只做体量不做高度竞赛
+-+/** 丘陵盆地：台地带平滑洼陷（纯视觉起伏，深陆内部） */
+-+export interface Basin { x: number; z: number; r: number; depth: number }
+-+export const BASINS: Basin[] = [
+-+  { x: -2300, z: -2500, r: 520, depth: 30 },
+-+  { x: 1400, z: -3300, r: 440, depth: 26 },
+-+]
+-+/** 峡湾水道：由口(A)向源头(B)深切北岸。只做减法（carve 陆地），机组侧恒为海，
+-+ *  不可能凭空造陆 —— 600m 净距约束天然不受威胁。 */
+-+export const FJORD_A = { x: -400, z: -1750 } // 口（可靠海域，距 T01 约 580m）
+-+export const FJORD_B = { x: -700, z: -3250 } // 源头（深陆）
+-+function fjordCarve(x: number, z: number): number {
+-+  const vx = FJORD_B.x - FJORD_A.x, vz = FJORD_B.z - FJORD_A.z
+-+  const t = Math.max(0, Math.min(1, ((x - FJORD_A.x) * vx + (z - FJORD_A.z) * vz) / (vx * vx + vz * vz)))
+-+  const d = Math.hypot(x - FJORD_A.x - vx * t, z - FJORD_A.z - vz * t)
+-+  return 1 - smoothstep(110, 280, d) // 通道内全切（宽 220m），边缘 280m 羽化成峭壁
+-+}
+-+/** 海蚀柱群：离岸峭岩（小半径高锥，浪蚀奇观；全部纯海中央） */
+-+export const STACKS: CoastFeature[] = [
+-+  { x: -1000, z: -1700, r: 45, h: 20, p1: 1.0, p2: 2.0, p3: 3.0 }, // 西岬外柱（岬前 467m 海中）
+-+  { x: -1150, z: -1500, r: 38, h: 16, p1: 3.0, p2: 5.0, p3: 1.0 }, // 西岬外柱二
+-+  { x: 2400, z: 400, r: 48, h: 18, p1: 2.0, p2: 4.0, p3: 0.0 },    // 东外海孤柱
+-+]
+-+/** 岛极坐标：角向谐波半径 rr(θ)，设色 mask 与锥形抬升共用（同一真值） */
+-+function islandPolar(f: CoastFeature, x: number, z: number): { d: number; rr: number } {
+-+  const dx = x - f.x, dz = z - f.z
+-+  const d = Math.hypot(dx, dz)
+-+  const th = Math.atan2(dz, dx)
+-+  const rr = f.r * (1 + 0.22 * Math.sin(3 * th + f.p1) + 0.14 * Math.sin(5 * th + f.p2) + 0.09 * Math.sin(8 * th + f.p3))
+-+  return { d, rr }
+-+}
+-+/** 全部离岸地貌（二主岛二卫岛一海岬三海蚀柱）：mask 与抬升共用此表 */
+-+const ISLES: CoastFeature[] = [...ISLANDS, ...SATS, ...HEADLANDS, ...STACKS]
+-+
+-+/** 方向性陆地基底（北/西，不含岛——岛只做锥形抬升+设色，不触发内陆分带） */
+-+function landBase(x: number, z: number): number {
+-+  const rw = rampAt(x, z)
+-+  const wN = smoothstep(0, rw, dNorth(x, z))
+-+  const wW = smoothstep(0, rw, dWest(x, z))
+-+  return Math.max(wN, wW) * (1 - fjordCarve(x, z))
+-+}
+-+
+-+/** 海岸过渡场（与陆地基底同式，不含岛）：vCoast / Step B 海岸距离场的同一真值 */
+-+export function coastT(x: number, z: number): number {
+-+  return landBase(x, z)
+-+}
+- 
+- /**
+-  * 陆地权重 0..1：0=开放海床，1=陆地。北/西两个方向各自产生一片陆地，
+-  * 用平滑 max 组合 —— 任一方向靠陆即抬升。南/东即保持 0（开放海）。
+-- * 噪声使海岸线蜿蜒曲折，破除「直线切割」的切割带感。
+-+ * 多尺度蜿蜒 + 高斯弧岬湾破除「直线切割」的切割带感；离岸岛叠加设色 mask。
+-  */
+- export function landMask(x: number, z: number): number {
+--  const wobN = (N.fbm(x * 0.00058 + 5.7, 40.0, 3) - 0.5) * 2 * COAST_WOBBLE
+--  const wobW = (N.fbm(90.0, z * 0.00058 - 3.2, 3) - 0.5) * 2 * COAST_WOBBLE
+--  // -z / -x 越大越靠陆；用较陡的 smoothstep 形成清晰海岸线
+--  const wN = smoothstep(COAST_N, COAST_N + 480, -z + wobN)
+--  const wW = smoothstep(COAST_W, COAST_W + 460, -x + wobW)
+--  return Math.max(wN, wW)
+-+  let m = landBase(x, z)
+-+  for (const f of ISLES) {
+-+    const { d, rr } = islandPolar(f, x, z)
+-+    if (d < rr + 120) m = Math.max(m, 1 - smoothstep(rr * 0.45, rr + 80, d))
+-+  }
+-+  return m
+-+}
+-+
+-+/** 雪线（米）：山地带中世界高度超过此值染雪冠（GPU 端，见 WorldTerrain v4）。
+-+ *  round5：205→300；round10：300→380 —— 只属于主峰/次峰/最高山脊，雪下露岩重见天日。 */
+-+export const SNOW_LINE = 380
+-+
+-+/** 近岸距离场（Step B-2）：粗网格倒角距离变换，0=水线/陆上，单位米，上限 1200。
+-+ *  懒加载单例（128² landMask 采样 + 两遍倒角，<0.3s）；WorldTerrain 烘 aShore，
+-+ *  selftest 锁约束。只读消费真值，不改变地形 —— 陆地冻结令下允许新增的只读消费。 */
+-+const SHORE_N = 128
+-+const SHORE_CAP = 1200
+-+let _shoreGrid: Float32Array | null = null
+-+function shoreGrid(): Float32Array {
+-+  if (_shoreGrid) return _shoreGrid
+-+  const N = SHORE_N, ext = 9200
+-+  const g = new Float32Array(N * N)
+-+  for (let j = 0; j < N; j++) {
+-+    const z = (j / (N - 1) - 0.5) * ext
+-+    for (let i = 0; i < N; i++) {
+-+      const x = (i / (N - 1) - 0.5) * ext
+-+      g[j * N + i] = landMask(x, z) > 0.02 ? 0 : 1e9 // 与水 mask 同阈值，水线处连续归零
+-+    }
+-+  }
+-+  const SQ2 = Math.SQRT2
+-+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { // 前向
+-+    const k = j * N + i
+-+    if (i > 0) g[k] = Math.min(g[k], g[k - 1] + 1)
+-+    if (j > 0) g[k] = Math.min(g[k], g[k - N] + 1)
+-+    if (i > 0 && j > 0) g[k] = Math.min(g[k], g[k - N - 1] + SQ2)
+-+    if (i < N - 1 && j > 0) g[k] = Math.min(g[k], g[k - N + 1] + SQ2)
+-+  }
+-+  for (let j = N - 1; j >= 0; j--) for (let i = N - 1; i >= 0; i--) { // 后向
+-+    const k = j * N + i
+-+    if (i < N - 1) g[k] = Math.min(g[k], g[k + 1] + 1)
+-+    if (j < N - 1) g[k] = Math.min(g[k], g[k + N] + 1)
+-+    if (i < N - 1 && j < N - 1) g[k] = Math.min(g[k], g[k + N + 1] + SQ2)
+-+    if (i > 0 && j < N - 1) g[k] = Math.min(g[k], g[k + N - 1] + SQ2)
+-+  }
+-+  const cell = ext / (N - 1)
+-+  for (let k = 0; k < g.length; k++) g[k] = Math.min(g[k] * cell, SHORE_CAP)
+-+  _shoreGrid = g
+-+  return g
+-+}
+-+/** 某点距最近水线的距离（米，0=陆上/水线，1200=远海）。双线性插值。 */
+-+export function shoreDistance(x: number, z: number): number {
+-+  const g = shoreGrid(), N = SHORE_N, ext = 9200
+-+  const fx = (x / ext + 0.5) * (N - 1), fz = (z / ext + 0.5) * (N - 1)
+-+  const i0 = Math.max(0, Math.min(N - 2, Math.floor(fx))), j0 = Math.max(0, Math.min(N - 2, Math.floor(fz)))
+-+  const tx = Math.max(0, Math.min(1, fx - i0)), tz = Math.max(0, Math.min(1, fz - j0))
+-+  const a = g[j0 * N + i0], b = g[j0 * N + i0 + 1], c = g[(j0 + 1) * N + i0], d = g[(j0 + 1) * N + i0 + 1]
+-+  return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz
+-+}
+-+
+-+/** 确定性 RNG（草地落位与 selftest 共用，保证"采样验证"与"真实落位"同分布） */
+-+export function mulberry32(seed: number) {
+-+  let a = seed >>> 0
+-+  return () => {
+-+    a |= 0
+-+    a = (a + 0x6d2b79f5) | 0
+-+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+-+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+-+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+-+  }
+-+}
+-+
+-+/** 草地拒绝采样命中数（kind 0=草原带 / 1=林下）：与 grassField.buildSet 同条件
+-+ *  （landMask≥0.05 且按 biome 权重接受）。默认 2 万次试投，命中 >1% 即对应
+-+ *  生物群系带真实存在、全量 6 万可按同分布铺满。 */
+-+export function grassSampleHits(kind: 0 | 1, tries = 20000): number {
+-+  const rnd = mulberry32(kind === 0 ? 1337 : 7331)
+-+  let hits = 0
+-+  for (let i = 0; i < tries; i++) {
+-+    const x = (rnd() * 2 - 1) * 4550
+-+    const z = (rnd() * 2 - 1) * 4550
+-+    if (landMask(x, z) < 0.05) continue
+-+    const w = biomeWeights(x, z)
+-+    if (rnd() > (kind === 0 ? w.grass : w.forest)) continue
+-+    hits++
+-+  }
+-+  return hits
+-+}
+-+
+-+/** 六类生物群系权重（CPU 端，与 WorldTerrain v4 GPU 分带同式）：沙岸/潮带/草原/林地/缓丘/远山。
+-+ *  供贴地物（草地散布等）与 selftest 消费；海面（land≈0）返回全零。 */
+-+export interface BiomeWeights {
+-+  sand: number; tidal: number; grass: number; forest: number; hill: number; mountain: number
+-+}
+-+export function biomeWeights(x: number, z: number): BiomeWeights {
+-+  const L = landMask(x, z)
+-+  if (L <= 0.001) return { sand: 0, tidal: 0, grass: 0, forest: 0, hill: 0, mountain: 0 }
+-+  const sand = 1 - smoothstep(0.06, 0.16, L)
+-+  const tidal = smoothstep(0.05, 0.12, L) * (1 - smoothstep(0.16, 0.28, L))
+-+  const grass = smoothstep(0.14, 0.30, L) * (1 - smoothstep(0.45, 0.62, L))
+-+  const forest = smoothstep(0.38, 0.55, L) * (1 - smoothstep(0.68, 0.82, L))
+-+  const hill = smoothstep(0.60, 0.75, L) * (1 - smoothstep(0.85, 0.95, L))
+-+  const mountain = smoothstep(0.82, 0.93, L)
+-+  // 主导群系对比增强（pow 1.25 再归一，与 GPU 同式）：过渡带不再"混在一起看不真切"
+-+  const ce = 1.25
+-+  const eSand = sand ** ce, eTidal = tidal ** ce, eGrass = grass ** ce
+-+  const eForest = forest ** ce, eHill = hill ** ce, eMtn = mountain ** ce
+-+  const s = eSand + eTidal + eGrass + eForest + eHill + eMtn
+-+  // 中间过渡带各分量和可能 <1（分带交叠设计），归一保证"权重"语义
+-+  if (s < 1e-6) return { sand: 0, tidal: 0, grass: 0, forest: 0, hill: 0, mountain: 0 }
+-+  return { sand: eSand / s, tidal: eTidal / s, grass: eGrass / s, forest: eForest / s, hill: eHill / s, mountain: eMtn / s }
+-+}
+-+
+-+/** 高度网格烘焙（Step C1 地形投影用）：size² 采样 terrainSurfaceY，
+-+ *  data[j*size+i] ↔ x=(i/(size-1)-0.5)*extent, z=(j/(size-1)-0.5)*extent，
+-+ *  与 GPU 端 uv = xz/extent+0.5 同式（v=0 ↔ z=-extent/2，DataTexture flipY=false）。
+-+ *  纯真值采样，不改变任何地形 —— 陆地冻结令下允许新增的只读消费。 */
+-+export function bakeHeightGrid(size: number, extent: number): { size: number; extent: number; data: Float32Array } {
+-+  const data = new Float32Array(size * size)
+-+  for (let j = 0; j < size; j++) {
+-+    const z = (j / (size - 1) - 0.5) * extent
+-+    for (let i = 0; i < size; i++) {
+-+      data[j * size + i] = terrainSurfaceY((i / (size - 1) - 0.5) * extent, z)
+-+    }
+-+  }
+-+  return { size, extent, data }
+- }
+- 
+- /**
+-@@ -83,18 +335,45 @@ export function terrainSurfaceY(x: number, z: number): number {
+- }
+- 
+- export function terrainHeight(x: number, z: number): number {
+--  const land = landMask(x, z)
+-+  const land = landBase(x, z)
+-   // 海床基准（低，贴近真实海平台）+ 极低幅微地貌（不是完全平面）
+-   const bed = (N.fbm(x * 0.0009, z * 0.0009, 3) - 0.5) * 4.0
+-   let h = 2.0 + bed
+-   if (land > 0) {
+--    // 分带：近岸沙带(矮、平缓) → 森林台地(中) → 内陆远山(高、噪声起伏)
+-+    // 分带（round7 全程缓坡 + round9 还回远山）：沙带 → 台地拉长 → 高地【线性登山】
+-+    // （全程等坡、无后墙；上限 400m 级 + 高矮分区；近岸 1km 仍是滩原丘陵）
+-     const sand = smoothstep(0.0, 0.28, land)      // 近海黄沙带
+--    const forest = smoothstep(0.20, 0.72, land)   // 森林台地
+--    const mountain = smoothstep(0.55, 1.0, land)  // 内陆远山
+-+    const forest = smoothstep(0.20, 0.80, land)   // 森林台地（拉长，盖住中段）
+-+    const mountain = clamp01((land - 0.55) / 0.45) // 内陆高地（线性登山）
+-+    const roll = (N.fbm(x * 0.0021 + 8.8, z * 0.0021 - 3.3, 2) - 0.5) * 2 // 台地丘陵起伏 ±12m
+-+    const crag = N.ridged(x * 0.00032 + 3.1, z * 0.00032 - 1.4, 4)        // 主峰（锐化）
+-+    const crag2 = N.ridged(x * 0.0011 - 7.7, z * 0.0011 + 4.2, 2)         // 次峰（破碎感）
+-+    const warp = (N.fbm(x * 0.0004 - 11.0, z * 0.0004 + 5.0, 3) - 0.5) * 1600 // 域扭曲（山脊走弯）
+-+    const ridge = N.ridged(x * 0.0009 + warp * 0.0009 + 3.1, z * 0.0009 - 1.4, 3) // 曲折山脊谷地
+-+    const mAmp = 0.85 + 0.6 * N.fbm(x * 0.0002 - 5.5, z * 0.0002 + 2.2, 2) // 山系高矮分区
+-     h += sand * 10
+--    h += forest * (34 + 20 * N.ridged(x * 0.0005 + 1.7, z * 0.0005 - 9.3, 3))
+--    h += mountain * (60 + 190 * N.ridged(x * 0.00032 + 3.1, z * 0.00032 - 1.4, 4))
+-+    h += forest * (34 + 20 * N.ridged(x * 0.0005 + 1.7, z * 0.0005 - 9.3, 3) + 12 * roll)
+-+    h += mountain * (90 + 170 * crag + 70 * crag2 + 70 * ridge) * mAmp
+-+    for (const b of BASINS) { // 丘陵盆地（平滑洼陷）
+-+      const db = Math.hypot(x - b.x, z - b.z)
+-+      if (db < b.r) h -= b.depth * (1 - smoothstep(0, b.r, db))
+-+    }
+-+  }
+-+  for (const pk of PEAKS) { // 主峰/次峰（round11：宽肩缓脊 + 基座裙边，坐进山脊）
+-+    const dp = Math.hypot(x - pk.x, z - pk.z)
+-+    if (dp < pk.r * 2.6) {
+-+      const prof = 1 - smoothstep(0, pk.r, dp)
+-+      const gully = (N.ridged(x * 0.006 + pk.x * 0.01, z * 0.006 - pk.z * 0.01, 3) - 0.5) * 2
+-+      h += pk.h * prof ** 1.05 + pk.h * 0.14 * gully * prof
+-+      // 裙边：峰脚向外 1.2r 处垫高 0.32h、2.6r 处归零 —— 峰从山脊里“长出来”，不断层
+-+      h += pk.h * 0.32 * smoothstep(pk.r * 0.3, pk.r * 1.2, dp) * (1 - smoothstep(pk.r * 1.2, pk.r * 2.6, dp))
+-+    }
+-+  }
+-+  // 离岸岛/海岬（第 32 轮）：不规则轮廓锥形抬升（中心全高 → rr+180m 处归零），
+-+  // 与主体陆地自然衔接；岛只走本抬升，不触发上面的内陆分带（避免岛变高山）。
+-+  for (const f of ISLES) {
+-+    const { d, rr } = islandPolar(f, x, z)
+-+    if (d < rr + 180) h += f.h * (1 - smoothstep(0, rr + 180, d))
+-   }
+-   // 升压站局地再压平（站体仍在海中央）
+-   const dS = Math.hypot(x - SUBSTATION.x, z - SUBSTATION.z)
+diff --git a/README.md b/README.md
+index a565e42..a82d475 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # 0824-2026 · 风电场 3A 数字孪生（方案与设计仓）
+ 
+-> 目标：为西安交大风电场偏航优化项目打造**影院级、深色系、3D Web 数字孪生**（对标 51World/数字冰雹/Omniverse 的观感），部署至 Cloudflare Pages。
++> 目标：为西北安交大风电场偏航优化项目打造**影院级、深色系、3D Web 数字孪生**（对标 51World/数字冰雹/Omniverse 的观感），部署至 Cloudflare Pages。
+ > 现役科研台 [wind-farm-viz.pages.dev](https://wind-farm-viz.pages.dev/) 保持封板不动；本仓是它的**暗色旗舰姊妹篇**。
+ 
+ ## 📚 文档导航
+diff --git a/twin/scripts/selftest.mts b/twin/scripts/selftest.mts
+index 1f5bfab..4d21572 100644
+--- a/twin/scripts/selftest.mts
++++ b/twin/scripts/selftest.mts
+@@ -4,14 +4,10 @@
+ // 依赖：仅 Node 22 原生类型剥离；无浏览器、无网络。
+ // ================================================================
+ import {
+-  farmFrame, optimizeYaw, windAt, FARM_RATED_MW, dayNight,
++  farmFrame, optimizeYaw, windAt, FARM_RATED_MW,
+ } from '../src/data/farmSim.ts'
+ import { powerCurveKw, yawFactor, wakeDeficit, TILT_F, wakeDeflection } from '../src/data/turbinePhysics.ts'
+-import {
+-  FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY,
+-  landMask, biomeWeights, SNOW_LINE, grassSampleHits,
+-  PEAKS, FJORD_A, FJORD_B, STACKS, HEADLANDS, bakeHeightGrid,
+-} from '../src/scene/terrainUtil.ts'
++import { FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY } from '../src/scene/terrainUtil.ts'
+ 
+ let pass = 0
+ let fail = 0
+@@ -231,11 +227,10 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
+     if (sy > 12) seaOK = false // 风机区是海床，应接近海平面
+   }
+   // 第 31 轮「开放外海」：北(-z)/西(-x) 两相邻侧为陆地，南(+z)/东(+x) 两相邻侧开放为海。
+-  // round6 起过渡带放宽至 1400m（缓坡入海），探针相应外移至 3000m（仍应 ≥30m）——
+-  // 旧 2300m 探针锁的是“一堵墙”，与用户要的缓坡直接冲突，故外移而非降低阈值。
++  // 陆地侧在离场心约 2300m 处应已明显高于海面（≥30m）。
+   for (const dir of [[0, -1] as const, [-1, 0] as const]) {
+     const [dx, dz] = dir
+-    const h = terrainHeight(FARM_CENTER.x + dx * 3000, FARM_CENTER.z + dz * 3000)
++    const h = terrainHeight(FARM_CENTER.x + dx * 2300, FARM_CENTER.z + dz * 2300)
+     if (h < 30) coastOK = false
+   }
+   // 开放侧：南(+z)/东(+x) 在离场心 2300m 处应仍为海床（≤12m，无陆地抬升）
+@@ -256,129 +251,5 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
+   ok('V&V 波浪位移不污染贴地基准（静态几何=terrainSurfaceY）', waveOK, '机位贴地基准与地形同源')
+ }
+ 
+-// 16. 第 32 轮 A：真实海岸线/地貌（分形海岸 + 六群系 + 岛岬 + 草地核心）
+-// ---------------------------------------------------------------
+-// A1 海岸数值：机组/升压站零沾陆、600m 环零沾陆、开放侧纯海、升压站压平
+-{
+-  let mxUnit = 0
+-  for (const u of [...FARM, SUBSTATION]) mxUnit = Math.max(mxUnit, landMask(u.x, u.z))
+-  ok('R32-A1 机组/升压站零沾陆：landMask ≡ 0', mxUnit === 0, `max=${mxUnit}`)
+-
+-  // 600m 环采 16 点/机：过渡踪（>0.02）都不许进环
+-  let ringBad = 0
+-  for (const u of [...FARM, SUBSTATION]) {
+-    for (let a = 0; a < 16; a++) {
+-      const px = u.x + 600 * Math.cos((a / 16) * 2 * Math.PI)
+-      const pz = u.z + 600 * Math.sin((a / 16) * 2 * Math.PI)
+-      if (landMask(px, pz) > 0.02) ringBad++
+-    }
+-  }
+-  ok('R32-A1 600m 机组净距：环上 160 点零沾陆（>0.02 即 fail）', ringBad === 0, `沾陆点=${ringBad}`)
+-
+-  // 开放侧（南/东 2300m 探针）：纯海、无岛 mask、无抬升
+-  let openPure = true
+-  for (const dir of [[0, 1] as const, [1, 0] as const]) {
+-    const [dx, dz] = dir
+-    const x = FARM_CENTER.x + dx * 2300
+-    const z = FARM_CENTER.z + dz * 2300
+-    if (landMask(x, z) !== 0 || terrainHeight(x, z) > 12) openPure = false
+-  }
+-  ok('R32-A1 开放外海纯净：南/东探针 landMask=0 且高度≤12m', openPure, '两相邻侧开放为海')
+-
+-  ok('R32-A1 升压站局地压平：站体高度 ≤3m', terrainHeight(SUBSTATION.x, SUBSTATION.z) <= 3,
+-    `=${terrainHeight(SUBSTATION.x, SUBSTATION.z).toFixed(2)}m`)
+-}
+-
+-// A2 生物群系：海面全零、权重归一、中带草原+林地主导
+-{
+-  const sea = biomeWeights(FARM_CENTER.x, FARM_CENTER.z)
+-  const seaZero = sea.sand === 0 && sea.tidal === 0 && sea.grass === 0
+-    && sea.forest === 0 && sea.hill === 0 && sea.mountain === 0
+-  ok('R32-A2 海面群系全零（场心 land=0 处）', seaZero, JSON.stringify(sea))
+-
+-  // 中带点：x=-100 列自适应找 L∈[0.4,0.7]（ramp 宽度会变，固定坐标不可靠）
+-  let midZ = 0
+-  for (let z = -2000; z >= -4600; z -= 50) {
+-    const L = landMask(-100, z)
+-    if (L >= 0.4 && L <= 0.7) { midZ = z; break }
+-  }
+-  const w = biomeWeights(-100, midZ)
+-  const L = landMask(-100, midZ)
+-  const sum = w.sand + w.tidal + w.grass + w.forest + w.hill + w.mountain
+-  ok('R32-A2 中带草原+林地主导（L∈[0.4,0.7] 处）',
+-    midZ !== 0 && w.grass + w.forest > 0.6, `z=${midZ} L=${L.toFixed(3)} grass=${w.grass.toFixed(2)} forest=${w.forest.toFixed(2)}`)
+-  ok('R32-A2 权重归一（和=1）', close(sum, 1, 1e-9), `sum=${sum}`)
+-}
+-
+-// A3 雪线：SNOW_LINE=205；远山有雪载体（>205）、草原带无雪（<205）
+-{
+-  ok('R32-A3 雪线 SNOW_LINE = 380（CPU/GPU 同值，round10 上调）', SNOW_LINE === 380, `=${SNOW_LINE}`)
+-  // round7 起高地振幅分区高矮，固定深陆点未必高于雪线 —— 改扫北陆块存在性
+-  // （主峰 1200m 级恒在，雪冠载体不可能消失；断言存在性而非定点高度）
+-  let highFound = false
+-  for (let x = -4600; x <= -100 && !highFound; x += 200) {
+-    for (let z = -4600; z <= -2100; z += 200) {
+-      if (landMask(x, z) > 0.9 && terrainHeight(x, z) > SNOW_LINE) { highFound = true; break }
+-    }
+-  }
+-  ok('R32-A3 高地高于雪线（雪冠有载体）', highFound, '北陆块扫描')
+-  const midH = terrainHeight(-100, -2600) // 草原中带
+-  ok('R32-A3 草原带低于雪线（雪不污染草原）', midH < SNOW_LINE, `=${midH.toFixed(1)}m`)
+-}
+-
+-// A5 复杂地貌奇观（round3）：主峰高度、峡湾通道为海、海岬连陆、海蚀柱孤立
+-{
+-  const peakH = terrainHeight(PEAKS[0].x, PEAKS[0].z)
+-  ok('R32-A5 主峰直插云霄（>600m，12倍轮毂高的量级）', peakH > 600, `=${peakH.toFixed(0)}m`)
+-  const midX = (FJORD_A.x + FJORD_B.x) / 2
+-  const midZ = (FJORD_A.z + FJORD_B.z) / 2
+-  ok('R32-A5 峡湾通道为海（中线 landMask=0）', landMask(midX, midZ) === 0,
+-    `L=${landMask(midX, midZ)} h=${terrainHeight(midX, midZ).toFixed(1)}m`)
+-  const hd = HEADLANDS[0]
+-  ok('R32-A5 海岬连陆（mask=1，为连岛岬非孤岛）', landMask(hd.x, hd.z) === 1,
+-    `L=${landMask(hd.x, hd.z)}`)
+-  // 每柱配一个向海见证点（柱体 mask≈1、高>10m，向海一侧 300m 外为海即孤立；
+-  // 近岸柱的向陆一侧本就连浅滩，不在此约束）
+-  const WIT: [number, number][] = [[-700, -1700], [-850, -1350], [2700, 400]]
+-  let stacksOK = true
+-  STACKS.forEach((st, i) => {
+-    if (landMask(st.x, st.z) < 0.9) stacksOK = false
+-    if (terrainHeight(st.x, st.z) < 10) stacksOK = false
+-    if (landMask(WIT[i][0], WIT[i][1]) !== 0) stacksOK = false
+-  })
+-  ok('R32-A5 海蚀柱孤立（体 mask≈1、高>10m、向海见证点为海）', stacksOK, '三柱')
+-}
+-
+-// A4 草地核心：2 万次试投，草原/林下命中 >1%（>200）
+-{
+-  const g = grassSampleHits(0)
+-  const f = grassSampleHits(1)
+-  ok('R32-A4 草原带可落位（拒绝采样命中>1%）', g > 200, `命中=${g}/20000`)
+-  ok('R32-A4 林下可落位（拒绝采样命中>1%）', f > 200, `命中=${f}/20000`)
+-}
+-
+-// C1 高度烘焙：网格索引↔坐标映射与真值逐点一致（GPU uv = xz/extent+0.5 的 CPU 侧锁）
+-{
+-  const g = bakeHeightGrid(16, 9200)
+-  const pts: Array<[number, number]> = [[0, 0], [15, 15], [0, 15], [15, 0], [7, 9], [3, 12]]
+-  let gridOK = g.size === 16 && g.extent === 9200 && g.data.length === 256
+-  for (const [i, j] of pts) {
+-    const x = (i / 15 - 0.5) * 9200, z = (j / 15 - 0.5) * 9200
+-    if (Math.abs(g.data[j * 16 + i] - terrainSurfaceY(x, z)) > 0.01) gridOK = false // Float32 存取容差
+-  }
+-  ok('R32-C1 高度烘焙映射一致（索引↔坐标↔真值）', gridOK, '16²抽6点')
+-}
+-
+-// C3 月夜约定：午夜月在天上（仰角>30°）、正午月在地平线下、月相门控对位
+-{
+-  const mid = dayNight(0)
+-  const noon = dayNight(12)
+-  const moonOK = mid.moonDir[1] > 0.5 && mid.moonF === 1
+-    && noon.moonDir[1] < 0.2 && noon.moonF === 0
+-    && noon.dayF === 1 && mid.dayF === 0
+-  ok('R32-C3 月夜约定（午夜月高悬/正午月隐/门控对位）', moonOK,
+-    `午夜月高=${mid.moonDir[1].toFixed(2)} 正午月高=${noon.moonDir[1].toFixed(2)}`)
+-}
+-
+ console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)
+ process.exit(fail ? 1 : 0)
+diff --git a/twin/scripts/shotlocal.mjs b/twin/scripts/shotlocal.mjs
+index c38e0d7..31714ca 100644
+--- a/twin/scripts/shotlocal.mjs
++++ b/twin/scripts/shotlocal.mjs
+@@ -1,4 +1,6 @@
+ // R32 临时截图：复用现有 shot.mjs 但用系统 Chrome（无需 NSS）
++import { fileURLToPath } from 'node:url'
++import path from 'node:path'
+ import puppeteer from 'puppeteer-core'
+ 
+ const url = process.argv[2] || 'http://127.0.0.1:5173/'
+diff --git a/twin/src/App.tsx b/twin/src/App.tsx
+index e1cb2bc..c9ad47c 100644
+--- a/twin/src/App.tsx
++++ b/twin/src/App.tsx
+@@ -84,7 +84,7 @@ export default function App() {
+             onCreated={({ gl, scene, camera }) => {
+               gl.toneMapping = THREE.ACESFilmicToneMapping
+               gl.toneMappingExposure = 1.14
+-              scene.fog = new THREE.FogExp2('#040911', 0.00013) // C4：0.00022→0.00013 —— 4500m峰从63%雾洗降到25%，去“大雾”，留空气感
++              scene.fog = new THREE.FogExp2('#040911', 0.00022)
+               const canvas = gl.domElement
+               canvas.addEventListener('webglcontextlost', (e) => {
+                 e.preventDefault()
+diff --git a/twin/src/data/farmSim.ts b/twin/src/data/farmSim.ts
+index 2aa0c4e..9148eda 100644
+--- a/twin/src/data/farmSim.ts
++++ b/twin/src/data/farmSim.ts
+@@ -429,9 +429,7 @@ export function dayNight(tHours: number): {
+   const sy = Math.sin(el)
+   const dayF = Math.min(1, Math.max(0, (elDeg + 4) / 16)) // 连续，触底 0
+   // 月亮=日对点：方位 az+180、仰角 −38·sinθ（夜正昼负），日落/日出天然衔接
+-  // C3 修正：旧式 38·sinθ 在午夜为 −37°（月在地平线下）而正午 +38°（月高悬），
+-  // 正负写反 —— 夜里 moonF=1 却只能从地平线爬出微光，正是“没有月亮”的根因
+-  const elM = (-38 * Math.sin(th) * Math.PI) / 180
++  const elM = (38 * Math.sin(th) * Math.PI) / 180
+   const azM = az + Math.PI
+   const moonF = Math.min(1, Math.max(0, (-elDeg + 3) / 18))
+   return {
+diff --git a/twin/src/scene/SkyAurora.tsx b/twin/src/scene/SkyAurora.tsx
+index 1d0fbbf..b0e6cd6 100644
+--- a/twin/src/scene/SkyAurora.tsx
++++ b/twin/src/scene/SkyAurora.tsx
+@@ -22,7 +22,6 @@ varying vec3 vDir;
+ uniform float uTime;
+ uniform float uDay;
+ uniform vec3 uSunDir;
+-uniform vec3 uMoonDir;
+ uniform sampler2D uSkyTex;
+ 
+ float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+@@ -115,20 +114,6 @@ void main() {
+   col += vec3(0.92, 0.97, 1.0) * pow(sunDot, 1400.0) * 1.35 * uDay;
+   col += vec3(0.32, 0.46, 0.58) * pow(sunDot, 14.0) * 0.16 * uDay;
+ 
+-  // —— 明月（C3）：月轮 + 晕 + 远辉，随夜色渐显（night 门控，昼夜连续不断裂）——
+-  vec3 md = normalize(uMoonDir);
+-  float moonDot = clamp(dot(d, md), 0.0, 1.0);
+-  float mDisc = smoothstep(0.99980, 0.99995, moonDot); // 月面（~0.6°）
+-  float limb = 0.75 + 0.25 * smoothstep(0.99980, 1.0, moonDot); // 临边昏暗
+-  vec3 moonWhite = vec3(0.92, 0.96, 1.0);
+-  col += moonWhite * mDisc * limb * 2.4 * night; // 明盘
+-  // 月海：两块暗斑（程序写意，不求精确环形山）
+-  float maria = smoothstep(0.45, 0.9, fbm(d.xy * 900.0 + md.xy * 130.0));
+-  col -= moonWhite * mDisc * maria * 0.35 * night;
+-  col += vec3(0.55, 0.70, 0.85) * pow(moonDot, 900.0) * 0.9 * night; // 内晕
+-  col += vec3(0.35, 0.52, 0.68) * pow(moonDot, 90.0) * 0.22 * night; // 外晕
+-  col += vec3(0.20, 0.32, 0.44) * pow(moonDot, 9.0) * 0.10 * night; // 远辉（月出月落的地平气息）
+-
+   gl_FragColor = vec4(col, 1.0);
+ }
+ `
+@@ -145,7 +130,6 @@ export default function SkyAurora() {
+   const uniforms = useMemo(() => ({
+     uTime: { value: 0 }, uDay: { value: 0 },
+     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+-    uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
+     uSkyTex: { value: skyTexture },
+   }), [skyTexture])
+ 
+@@ -155,7 +139,6 @@ export default function SkyAurora() {
+     u.uTime.value = state.clock.elapsedTime
+     u.uDay.value = skyState.dayF
+     u.uSunDir.value.copy(skyState.sunDir)
+-    u.uMoonDir.value.copy(skyState.moonDir)
+   })
+ 
+   return (
+diff --git a/twin/src/scene/WorldTerrain.tsx b/twin/src/scene/WorldTerrain.tsx
+index f056eb7..6635e4a 100644
+--- a/twin/src/scene/WorldTerrain.tsx
++++ b/twin/src/scene/WorldTerrain.tsx
+@@ -2,13 +2,13 @@
+ import { useMemo } from 'react'
+ import { useFrame } from '@react-three/fiber'
+ import * as THREE from 'three'
+-import { terrainSurfaceY, landMask, coastT, FARM_CENTER, bakeHeightGrid } from './terrainUtil'
++import { terrainSurfaceY, landMask, FARM_CENTER } from './terrainUtil'
+ import { skyState } from './lightState'
+ import { windAt } from '../data/farmSim'
+ import { useSim } from '../state/simStore'
+ 
+ // ============================================================
+-// 海洋地面（第 32 轮 A 重构 v4：六类生物群系 + 岩雪山体 + 海面克制化）
++// 海洋地面（第 29/30 轮重构：用户验收回访）
+ // ------------------------------------------------------------
+ // 诉求校正：
+ //   · 海陆交界要精细、陆地明显高于海 → 海盆半径扩大，海岸带陡升（terrainUtil）；
+@@ -27,10 +27,7 @@ varying float vWater;
+ varying vec3 vWPos;
+ varying vec3 vWN;
+ varying float vLand;
+-varying float vH;
+-varying float vCoast;
+ attribute float aLand;
+-attribute float aCoast;
+ uniform float uTime;
+ uniform vec2 uWind;
+ uniform vec2 uCenter;
+@@ -67,8 +64,6 @@ void main() {
+   float water = 1.0 - smoothstep(0.0, 0.02, aLand);
+   vWater = water;
+   vLand = aLand;
+-  vH = baseY;
+-  vCoast = aCoast;
+ 
+   // 近场收敛：离场心越近波浪越收敛（塔基贴地、风场稳定）
+   float d = length(wp.xz - uCenter);
+@@ -91,10 +86,9 @@ void main() {
+   vec3 newPos = vec3(wp.x, baseY + disp.y * lift, wp.z);
+   newPos.xz += disp.xz * lift * 0.75;
+ 
+-  // 法线：海水用大尺度 Gerstner 法线；陆地用真实几何法线（computeVertexNormals），
+-  // 山体明暗/雪沟/裸岩全靠它 —— 此前陆地近似上向是“盐堆”感的根因（round4 修复）
++  // 法线：混合大尺度 Gerstner 法线与上向法线；陆地用原始（近似上向）
+   vec3 gNorm = normalize(cross(binormal, tangent));
+-  vec3 n = normalize(mix(normal, gNorm, water));
++  vec3 n = normalize(mix(vec3(0.0, 1.0, 0.0), gNorm, water));
+   vWN = n;
+ 
+   gl_Position = projectionMatrix * modelViewMatrix * vec4(newPos, 1.0);
+@@ -107,17 +101,12 @@ varying float vWater;
+ varying vec3 vWPos;
+ varying vec3 vWN;
+ varying float vLand;
+-varying float vH;
+-varying float vCoast;
+ uniform float uTime;
+ uniform float uDayF;
+ uniform float uGlow;
+ uniform vec3 uSunDir;
+ uniform vec3 uFogColor;
+ uniform float uFogDensity;
+-uniform vec2 uWind; // Step B：泡沫顺风拉丝用风向（uniforms 本就有，FRAG 补声明）
+-uniform sampler2D uHeightTex; // Step C1：烘焙高度图（512²，uv = xz/9200+0.5）
+-uniform vec3 uMoonDir; // Step C3：月光方向（地形月夜漫反射 + 水面月路）
+ 
+ float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+ float vnoise(vec2 p){
+@@ -162,25 +151,6 @@ vec3 waterNormal(vec2 p) {
+   return normalize(n);
+ }
+ 
+-// —— 地形投影（Step C1）：沿太阳方向 march 高度图 ——
+-// 10 步、近密远疏（40m→~3000m），软半影；返回 1=全亮、0=全影。
+-// 调用方以 shadowAmt 按太阳高度连续渐隐；域外视为无遮挡。
+-float terrainShadow(vec3 p, vec3 sunDir) {
+-  float res = 1.0;
+-  float t = 40.0;
+-  for (int i = 0; i < 10; i++) {
+-    vec3 tp = p + sunDir * t;
+-    vec2 suv = tp.xz / 9200.0 + 0.5;
+-    if (suv.x > 0.001 && suv.x < 0.999 && suv.y > 0.001 && suv.y < 0.999) {
+-      float th = texture2D(uHeightTex, suv).r;
+-      res = min(res, 8.0 * (tp.y - th + 1.5) / t);
+-    }
+-    t *= 1.55;
+-  }
+-  float sh = clamp(res, 0.0, 1.0);
+-  return sh * sh * (3.0 - 2.0 * sh);
+-}
+-
+ void main() {
+   float night = 1.0 - uDayF;
+   vec3 V = normalize(cameraPosition - vWPos);
+@@ -194,10 +164,6 @@ void main() {
+   // 浪尖层次：片元内用解析波高现算（摆脱顶点网格 → 消除条带/格子感）
+   float wh = waveHeight(vWPos.xz);
+   float crest = smoothstep(0.25, 0.85, wh); // 归一化波高 → 0..1 浪尖
+-  // Step B1：打散浪尖云斑 —— 高频 breakup 把正弦干涉的 200m+ 亮斑撕碎，
+-  // 提亮不同步下调（0.55→0.42），海面不再“长癣”
+-  float breakup = fbm(vWPos.xz * 0.020 + vec2(uTime * 0.05, -uTime * 0.03));
+-  crest *= 0.45 + 0.55 * smoothstep(0.25, 0.75, breakup);
+ 
+   // —— Fresnel 菲涅尔：贴水面反射天空；用「面朝上」gate 掉陡岸坡发白 ——
+   float upness = smoothstep(0.36, 0.72, N.y);
+@@ -207,11 +173,11 @@ void main() {
+   // 参照用户原图：海底深青黑，浪尖点缀青白，整体暗、不刺眼。
+   vec3 deepCol  = mix(vec3(0.008, 0.022, 0.038), vec3(0.050, 0.115, 0.185), uDayF); // 浪谷（深青黑）
+   vec3 shallowCol = mix(vec3(0.024, 0.055, 0.082), vec3(0.150, 0.310, 0.420), uDayF); // 浪尖（低饱和青蓝）
+-  vec3 waterCol = mix(deepCol, shallowCol, crest * 0.42);
++  vec3 waterCol = mix(deepCol, shallowCol, crest * 0.66);
+ 
+   // 天空反射：低饱和灰青蓝（白天）→ 近黑（夜），权重压低避免整片洗灰
+   vec3 skyRef = mix(vec3(0.014, 0.032, 0.054), vec3(0.150, 0.290, 0.385), uDayF);
+-  waterCol = mix(waterCol, skyRef, clamp(fres, 0.0, 1.0) * (0.045 + 0.07 * uDayF));
++  waterCol = mix(waterCol, skyRef, clamp(fres, 0.0, 1.0) * (0.055 + 0.085 * uDayF));
+ 
+   // —— 太阳/月亮镜面高光：细碎点状波光（点状，克制，不高亮成云斑）——
+   vec3 halfV = normalize(V + uSunDir);
+@@ -219,177 +185,46 @@ void main() {
+   float sparkle = fbm(vWPos.xz * 0.12 + uTime * 0.8) * fbm(vWPos.xz * 0.35 - uTime * 0.5);
+   spec *= (0.10 + 0.90 * sparkle);
+   vec3 sunCol = mix(vec3(0.11, 0.26, 0.38), vec3(0.80, 0.80, 0.78), uDayF);
+-  waterCol += sunCol * spec * (uDayF * 0.72 + night * 0.13);
+-
+-  // —— 波峰泡沫（Step B2）：顺风拉丝 + 米级碎点 + 三重稀疏门 ——
+-  // 各向异性坐标把各向同性云斑拉成风纹碎浪，随风漂移；只在最碎的浪尖出现
+-  vec2 wdirF = normalize(uWind + vec2(0.0001, 0.0));
+-  vec2 wperpF = vec2(-wdirF.y, wdirF.x);
+-  float alongW = dot(vWPos.xz, wdirF);
+-  float acroW = dot(vWPos.xz, wperpF);
+-  float foamStreak = fbm(vec2(alongW * 0.045 - uTime * 0.25, acroW * 0.20) + crest * 2.0);
+-  float foamFleck = vnoise(vWPos.xz * 0.9 + uTime * 0.4); // 米级碎点
+-  float foamMask = smoothstep(0.78, 0.97, crest)
+-    * smoothstep(0.55, 0.85, foamStreak)
+-    * (0.35 + 0.65 * smoothstep(0.55, 0.9, foamFleck));
++  waterCol += sunCol * spec * (uDayF * 0.9 + night * 0.16);
++
++  // —— 波峰泡沫：只在 crest，且提频打散成细碎稀疏浪花（克制；避免大块云斑）——
++  float foamNoise = fbm(vWPos.xz * 0.075 + uTime * 0.06 + crest * 3.0);
++  float foamMask = smoothstep(0.66, 0.98, crest) * (0.10 + 0.60 * smoothstep(0.58, 0.86, foamNoise));
+   vec3 foam = mix(vec3(0.028, 0.06, 0.09), vec3(0.50, 0.63, 0.68), uDayF); // 更低饱淡青白
+-  waterCol = mix(waterCol, foam, foamMask * (0.03 + uDayF * 0.09));
+-  // —— 水侧水线（Step B3）：紧贴岸线的海侧碎浪，与陆侧 foamDot 合成完整水线 ——
+-  // 水像素中 vLand∈(0,0.02) 即岸线外 15~40m；环岸/环岛/环柱自动出现，机组区 vLand=0 不受影响
+-  float surfBand = smoothstep(0.0, 0.004, vLand) * (1.0 - smoothstep(0.004, 0.02, vLand));
+-  float surfN = 0.35 + 0.65 * fbm(vWPos.xz * 0.30 + vec2(-uTime * 0.35, uTime * 0.2));
+-  waterCol = mix(waterCol, foam, surfBand * surfN * (0.10 + uDayF * 0.30) * vWater);
+-
+-  // —— 月路（C3）：明月在水面的镜面光路 + 月照涌动 ——
+-  // 旧版用太阳方向算夜高光，夜里太阳在地平线下故恒≈0（“夜里没光”的另一半根因）
+-  vec3 halfVM = normalize(V + normalize(uMoonDir));
+-  float moonSpec = pow(max(dot(Ns, halfVM), 0.0), 220.0);
+-  waterCol += vec3(0.38, 0.56, 0.70) * moonSpec * night * (0.25 + uGlow) * 1.1;
+-  waterCol += vec3(0.05, 0.12, 0.18) * crest * night * (0.25 + uGlow) * 0.55;
+-
+-  // —— 陆地 v4（六类生物群系 + 岩雪山体，第 32 轮 A）——
+-  // 与 CPU 端 biomeWeights() 同式；L = vLand（0 海 → 1 内陆）。
+-  float L = vLand;
+-  // 岸线破碎（round5）：渲染级高频扰动，沙/潮带按扰动后的 Lp 落位，水线参差 ——
+-  // CPU 端 biomeWeights 仍用平滑 L（草地散布不需要 40m 级参差），此处分歧是渲染级细节。
+-  float shoreN = fbm(vWPos.xz * 0.025 + 11.3);
+-  float Lp = L + (shoreN - 0.5) * 0.16;
+-  float wSand   = 1.0 - smoothstep(0.06, 0.16, Lp);
+-  float wTidal  = smoothstep(0.05, 0.12, Lp) * (1.0 - smoothstep(0.16, 0.28, Lp));
+-  float wGrass  = smoothstep(0.14, 0.30, L) * (1.0 - smoothstep(0.45, 0.62, L));
+-  float wForest = smoothstep(0.38, 0.55, L) * (1.0 - smoothstep(0.68, 0.82, L));
+-  float wHill   = smoothstep(0.60, 0.75, L) * (1.0 - smoothstep(0.85, 0.95, L));
+-  float wMtn    = smoothstep(0.82, 0.93, L);
+-  float wSandE = pow(wSand, 1.25); float wTidalE = pow(wTidal, 1.25); float wGrassE = pow(wGrass, 1.25);
+-  float wForestE = pow(wForest, 1.25); float wHillE = pow(wHill, 1.25); float wMtnE = pow(wMtn, 1.25);
+-  float wSum = wSandE + wTidalE + wGrassE + wForestE + wHillE + wMtnE + 1e-5;
+-  wSand = wSandE / wSum; wTidal = wTidalE / wSum; wGrass = wGrassE / wSum;
+-  wForest = wForestE / wSum; wHill = wHillE / wSum; wMtn = wMtnE / wSum;
+-
+-  // 日间群系色（A-round2：拉开色相/明度距离，分层可辨；仍压住饱和，克制不刺眼）
+-  vec3 cSand   = vec3(0.450, 0.360, 0.240); // 干沙（暖亮）
+-  vec3 cTidal  = vec3(0.160, 0.130, 0.090); // 潮间湿沙（深，湿润感）
+-  vec3 cGrass  = vec3(0.135, 0.235, 0.095); // 草原（压暗，远观不晃眼）
+-  vec3 cForest = vec3(0.070, 0.160, 0.100); // 林地（深绿）
+-  vec3 cHill   = vec3(0.230, 0.200, 0.130); // 缓丘（棕橄榄，与林地区分）
+-  vec3 cRock   = vec3(0.110, 0.120, 0.140); // 山岩（深灰）
+-
+-  // 细节噪声：草原/林地高频斑驳、沙粒微粒、山岩分形
+-  float g1 = vnoise(vWPos.xz * 0.020);
+-  float g2 = vnoise(vWPos.xz * 0.055 + 7.3);
+-  float grassN = g1 * 0.65 + g2 * 0.35;
+-  float sandN = vnoise(vWPos.xz * 0.11 + 3.1);
+-  float rockN = fbm(vWPos.xz * 0.008 + 1.7);
+-  float ribs = fbm(vec2(vWPos.x * 0.020 + vWPos.z * 0.013, vWPos.z * 0.031 - vWPos.x * 0.007)); // 沟脊（雪沟/岩脊/AO共用）
+-  float crownN = g1 * 0.5 + fbm(vWPos.xz * 0.030) * 0.5;
+-
+-  vec3 landDay = cSand * (0.92 + 0.16 * sandN) * wSand
+-               + cTidal * wTidal
+-               + cGrass * (0.78 + 0.44 * grassN) * wGrass
+-               + cForest * (0.78 + 0.44 * crownN) * wForest
+-               + cHill * (0.85 + 0.30 * rockN) * wHill
+-               + cRock * (0.80 + 0.40 * rockN) * wMtn;
+-  // 陆地起伏漫反射（只作用陆地；雪有自己的日光模型，不在此重复压暗）
+-  float landDiff = 0.70 + 0.30 * clamp(dot(N, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
+-  landDay *= mix(1.0, landDiff, 1.0 - vWater);
+-  // 湿沙带：紧贴水线压暗（退潮湿润感），只作用沙/潮带 —— 岸线“镶边”，破画笔渐变
+-  float wetBand = (1.0 - smoothstep(0.015, 0.10, Lp)) * clamp(wSand + wTidal, 0.0, 1.0);
+-  landDay *= 1.0 - wetBand * 0.45;
+-
+-  // —— 细节法线（round4）：高频起伏扰动，只用于雪/岩光照，制造嶙峋光影 ——
+-  float eD = 6.0;
+-  float dHx = fbm(vWPos.xz * 0.045 + 3.7) - fbm(vWPos.xz * 0.045 - vec2(eD * 0.045, 0.0) + 3.7);
+-  float dHz = fbm(vWPos.xz * 0.045 + 3.7) - fbm(vWPos.xz * 0.045 - vec2(0.0, eD * 0.045) + 3.7);
+-  vec3 Ndet = normalize(N + vec3(-dHx * 2.2, 0.0, -dHz * 2.2));
+-  // 微起伏（round8）：米级地表凹凸进法线，近看有“颗粒”，远处衰减防闪烁
+-  float camDist = length(cameraPosition - vWPos);
+-  float microFade = exp(-camDist / 380.0);
+-  if (microFade > 0.01) {
+-    float m1 = fbm(vWPos.xz * 0.55 + 7.1);
+-    float m2 = fbm(vWPos.xz * 0.55 + vec2(2.5, 0.0) + 7.1);
+-    float m3 = fbm(vWPos.xz * 0.55 + vec2(0.0, 2.5) + 7.1);
+-    Ndet = normalize(Ndet + vec3((m1 - m2) * 1.6, 0.0, (m1 - m3) * 1.6) * microFade);
+-  }
+-  float fade2 = exp(-camDist / 500.0); // 反照率微细节衰减（比法线稍远）
+-
+-  // 山脊裸岩：坡陡处露出山岩（细节法线让岩壁有明暗皴擦，谷地留绿）
+-  float steep = 1.0 - Ndet.y;
+-  float rockExp = smoothstep(0.42, 0.72, steep) * clamp(wHill + wMtn, 0.0, 1.0);
+-  landDay = mix(landDay, cRock * (0.85 + 0.30 * rockN), clamp(rockExp, 0.0, 1.0) * 0.85);
+-
+-  // —— 雪冠 v2（round4）：岩脊雪沟 + 日光质感，告别“盐堆” ——
+-  // 沟留雪、脊露岩：高频脊线 + 雪线扰动打破“一刀切”（雪线 380/460，与 CPU SNOW_LINE 同值）
+-  float snow = smoothstep(380.0, 460.0, vH + (ribs - 0.5) * 90.0);
+-  float slopeGate = smoothstep(0.35, 0.70, Ndet.y); // 陡壁挂不住雪（窄脊主峰正需要）
+-  float ribGate = 0.50 + 0.50 * smoothstep(0.30, 0.70, ribs); // 沟雪脊岩
+-  snow *= (0.25 + 0.75 * slopeGate) * ribGate;
+-  snow *= 0.35 + 0.65 * wMtn;
+-  float snowM = clamp(snow, 0.0, 1.0);
+-  // 雪的日光：向阳暖白 / 背阴冷蓝（整块平板白的根因在此）
+-  float sunDiff = clamp(dot(Ndet, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
+-  vec3 snowCol = mix(vec3(0.42, 0.50, 0.66), vec3(1.02, 1.00, 0.97), sunDiff);
+-  // 风蚀纹（sastrugi）：拉伸条纹明暗，近看有“风雕”质感
+-  float sast = fbm(vec2((vWPos.x + vWPos.z) * 0.06, (vWPos.x - vWPos.z) * 0.012));
+-  snowCol *= 0.88 + 0.24 * sast;
+-  // 雪晶闪光：只在向阳面星星点点（白天反光强度的来源，克制）
+-  vec3 Vv = normalize(cameraPosition - vWPos);
+-  vec3 Hv = normalize(Vv + uSunDir);
+-  float glint = pow(max(dot(Ndet, Hv), 0.0), 60.0);
+-  float glintN = fbm(vWPos.xz * 0.12 + uTime * 0.05);
+-  snowCol += vec3(1.0, 0.98, 0.94) * glint * smoothstep(0.50, 0.9, glintN) * uDayF * 4.0 * sunDiff;
+-  landDay = mix(landDay, snowCol, snowM);
+-  // 岩石质感（round5）：层理 + 碎石颗粒 + 凹缝 AO，杀“塑料黏土”；
+-  // round10 起只给高山 + 陡壁（丘陵带保持干净植被，不再整片压灰）
+-  float strata = sin(vH * 0.33 + rockN * 5.0 + Ndet.x * 2.0);
+-  float rockGrain = vnoise(vWPos.xz * 0.06) * 0.6 + vnoise(vWPos.xz * 0.17 + 4.2) * 0.4;
+-  float crevAO = 0.70 + 0.30 * smoothstep(0.25, 0.75, ribs * 0.5 + rockGrain * 0.5);
+-  float rockZone = clamp(wMtn + rockExp, 0.0, 1.0);
+-  float rockTex = (0.88 + 0.12 * strata) * (0.78 + 0.44 * rockGrain) * crevAO;
+-  landDay *= mix(1.0, rockTex, (1.0 - snowM) * clamp(rockZone, 0.0, 1.0));
+-  // 微反照率（round8）：厘米~米级地表质感，放大看的本钱；植被（草/树）不管，只做地
+-  if (fade2 > 0.02) {
+-    // 沙：风成波纹（定向）+ 散布卵石
+-    float ripple = sin(dot(vWPos.xz, vec2(0.9, 0.45)) * 2.2 + fbm(vWPos.xz * 0.15) * 9.0);
+-    float pebble = step(0.965, hash21(floor(vWPos.xz * 2.6) + 1.0));
+-    float sandZone = clamp(wSand + wTidal, 0.0, 1.0);
+-    landDay *= 1.0 + (ripple * 0.10 + (fbm(vWPos.xz * 2.3) - 0.5) * 0.25) * sandZone * fade2;
+-    landDay *= 1.0 - pebble * 0.35 * sandZone * fade2;
+-    // 草地：丛块浓淡（不是草叶，是地被斑驳；种草另起）
+-    float tuft = fbm(vWPos.xz * 0.9 + 2.2);
+-    landDay *= 1.0 + (tuft - 0.5) * 0.35 * clamp(wGrass + wForest * 0.5, 0.0, 1.0) * fade2;
+-    // 岩：裂隙网（深色脉）+ 碎石灰点
+-    float crack = 1.0 - abs(2.0 * fbm(vWPos.xz * 0.33 + 5.5) - 1.0);
+-    crack = pow(crack, 3.0);
+-    float scree = step(0.975, hash21(floor(vWPos.xz * 3.1) + 7.0));
+-    float bareRock = clamp(rockZone, 0.0, 1.0) * (1.0 - snowM);
+-    landDay *= 1.0 - crack * 0.40 * bareRock * fade2;
+-    landDay *= 1.0 + scree * 0.30 * bareRock * fade2;
+-    // 水线：泡沫碎点（陆侧水线镶边，水体泡沫归 Step B）
+-    float foamDot = step(0.93, hash21(floor(vWPos.xz * 1.4) + 3.0)) * (1.0 - smoothstep(0.005, 0.05, Lp));
+-    landDay = mix(landDay, vec3(0.75, 0.82, 0.84), foamDot * 0.7 * fade2);
+-  }
++  waterCol = mix(waterCol, foam, foamMask * (0.08 + uDayF * 0.18));
++
++  // —— 夜间暗潮微光：极弱青蓝涌动 ——
++  float moonSpec = pow(max(dot(Ns, halfV), 0.0), 220.0);
++  waterCol += vec3(0.05, 0.13, 0.20) * moonSpec * night * uGlow * 0.30;
++  waterCol += vec3(0.02, 0.06, 0.11) * crest * night * uGlow * 0.40;
++
++  // —— 陆地（分带生物群系：近岸黄沙 → 内陆森林 → 远山），与海面形成强对比 ——
++  // 用 vLand（0..1，向陆地线性增大）作为「离海岸远近」的代理：
++  //   vLand ∈ (0, 0.16)：沙带；vLand ∈ (0.14, 0.62)：森林；vLand > 0.55：远山。
++  float sandMask  = 1.0 - smoothstep(0.06, 0.17, vLand);            // 近岸沙带(只在低land)
++  float forestMask = smoothstep(0.12, 0.26, vLand) * (1.0 - smoothstep(0.60, 0.80, vLand));
++  float mtnMask   = smoothstep(0.55, 0.85, vLand);                 // 内陆远山
++
++  // 沙：低饱和暖黄（克制、不刺眼的黄褐），白天亮、夜里压暗
++  vec3 sandCol = mix(vec3(0.075, 0.058, 0.036), vec3(0.40, 0.34, 0.20), uDayF);
++  // 森林：低饱和冷绿（莫兰迪），白天呈现灰绿林地
++  vec3 forestCol = mix(vec3(0.035, 0.055, 0.044), vec3(0.12, 0.24, 0.15), uDayF);
++  // 远山：深灰青（大气剪影感，接原有冷调）
++  vec3 mtnCol = vec3(0.014, 0.030, 0.050) + vec3(0.012, 0.032, 0.055) * uDayF * 0.9;
+ 
+   float lm = vnoise(vWPos.xz * 0.0021);
+   lm += 0.5 * vnoise(vWPos.xz * 0.0055);
+-
+-  // 昼夜：夜间统一压暗（保留冷调），白天补微弱冷光
+-  vec3 landCol = landDay * mix(vec3(0.19, 0.20, 0.23), vec3(1.0), uDayF);
+-  // —— 月夜漫反射（C3）：月光给山体塑形，背阳面留天光底不死黑（包裹漫反射）——
+-  float moonDiff = clamp(dot(N, normalize(uMoonDir)) * 0.5 + 0.5, 0.0, 1.0);
+-  landCol += vec3(0.30, 0.42, 0.58) * moonDiff * night * 0.35;
+-  landCol += (lm - 0.5) * 0.04;                        // 微弱整体斑驳
++  // 森林纹理：细碎树冠斑驳（高频）、低饱和
++  float forestN = vnoise(vWPos.xz * 0.012);
++  forestN += 0.5 * vnoise(vWPos.xz * 0.030);
++
++  vec3 landCol = mtnCol;
++  // 森林在台地，沙在近岸，两者在各自带内叠加
++  landCol = mix(landCol, forestCol * (0.82 + 0.28 * forestN), forestMask * 0.9);
++  landCol = mix(landCol, sandCol * (0.9 + 0.2 * vnoise(vWPos.xz * 0.02)), sandMask * 0.9);
++  landCol += (lm - 0.5) * 0.04;                    // 微弱整体斑驳
+   landCol += vec3(0.012, 0.040, 0.060) * uDayF * 0.45; // 白天冷调补光
+ 
+-  // —— 投影落位（Step C1/C2）：只作用陆地；影里留 30% 天光 + 透冷调 ——
+-  // C2：①加重（0.38→0.30）；②随太阳高度渐显渐隐 —— 日出日落阴影淡入淡出。
+-  // 硬门限（uSunDir.y>0.02）是昼夜交替“啪”地开关的根因，改连续 fade。
+-  float shadowAmt = smoothstep(-0.01, 0.10, uSunDir.y) * step(0.005, uDayF);
+-  if (vWater < 0.5 && shadowAmt > 0.002) {
+-    float sh = terrainShadow(vWPos, uSunDir);
+-    landCol *= mix(1.0, mix(0.30, 1.0, sh), shadowAmt);
+-    landCol += vec3(0.010, 0.025, 0.045) * (1.0 - sh) * uDayF * shadowAmt; // 阴影透天光冷调
+-  }
+-
+   vec3 col = mix(landCol, waterCol, vWater);
+ 
+   // —— 空气透视（指数雾）：海水轻吃雾保色，远山吃雾显空气感 ——
+@@ -405,34 +240,21 @@ void main() {
+ export default function WorldTerrain() {
+   const { geo, mat } = useMemo(() => {
+     const SIZE = 9200
+-    const SEG = 400 // round8：23m 单元（160k 顶点，启动多 ~2s，换近岸轮廓）
++    const SEG = 300
+     const g = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG)
+     g.rotateX(-Math.PI / 2)
+     const pos = g.attributes.position as THREE.BufferAttribute
+     const land = new Float32Array(pos.count)
+-    const coast = new Float32Array(pos.count)
+     for (let i = 0; i < pos.count; i++) {
+       const x = pos.getX(i)
+       const z = pos.getZ(i)
+       const y = terrainSurfaceY(x, z)
+       pos.setY(i, y)
+       land[i] = landMask(x, z)
+-      coast[i] = coastT(x, z)
+     }
+     g.setAttribute('aLand', new THREE.BufferAttribute(land, 1))
+-    g.setAttribute('aCoast', new THREE.BufferAttribute(coast, 1))
+     g.computeVertexNormals()
+ 
+-    // Step C1 高度纹理：512² 烘焙（半浮点线性过滤；R16F WebGL2 可过滤，无需扩展）
+-    const hg = bakeHeightGrid(512, SIZE)
+-    const hdata = new Uint16Array(hg.size * hg.size)
+-    for (let k = 0; k < hdata.length; k++) hdata[k] = THREE.DataUtils.toHalfFloat(hg.data[k])
+-    const htex = new THREE.DataTexture(hdata, hg.size, hg.size, THREE.RedFormat, THREE.HalfFloatType)
+-    htex.magFilter = THREE.LinearFilter
+-    htex.minFilter = THREE.LinearFilter
+-    htex.wrapS = htex.wrapT = THREE.ClampToEdgeWrapping
+-    htex.needsUpdate = true
+-
+     const u = {
+       uTime: { value: 0 },
+       uWind: { value: new THREE.Vector2(0, 1) },
+@@ -441,9 +263,7 @@ export default function WorldTerrain() {
+       uGlow: { value: 1 },
+       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+       uFogColor: { value: new THREE.Color('#040911') },
+-      uFogDensity: { value: 0.00013 }, // C4：默认值随 App 场景雾（逐帧覆盖，此处仅首帧）
+-      uHeightTex: { value: htex },
+-      uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
++      uFogDensity: { value: 0.00022 },
+     }
+ 
+     const m = new THREE.ShaderMaterial({
+@@ -455,7 +275,7 @@ export default function WorldTerrain() {
+       depthWrite: true,
+       fog: false,
+     })
+-    m.customProgramCacheKey = () => 'terrain-ocean-v4'
++    m.customProgramCacheKey = () => 'terrain-ocean-v3'
+     ;(m.userData as any).u = u
+     return { geo: g, mat: m }
+   }, [])
+@@ -467,7 +287,6 @@ export default function WorldTerrain() {
+       uDayF: { value: number }
+       uGlow: { value: number }
+       uSunDir: { value: THREE.Vector3 }
+-      uMoonDir: { value: THREE.Vector3 }
+       uFogColor: { value: THREE.Color }
+       uFogDensity: { value: number }
+     }
+@@ -480,7 +299,6 @@ export default function WorldTerrain() {
+     uu.uGlow.value = dayF * 0.6 + night * nightGlow
+     uu.uDayF.value = dayF
+     uu.uSunDir.value.copy(skyState.sunDir)
+-    uu.uMoonDir.value.copy(skyState.moonDir)
+     const { fromDeg } = windAt(useSim.getState().tHours)
+     const th = (fromDeg * Math.PI) / 180
+     uu.uWind.value.set(Math.sin(th), Math.cos(th))
+diff --git a/twin/src/scene/grassField.tsx b/twin/src/scene/grassField.tsx
+index 66a26d1..c4ebcd2 100644
+--- a/twin/src/scene/grassField.tsx
++++ b/twin/src/scene/grassField.tsx
+@@ -1,195 +1,15 @@
+-import { useMemo, useRef } from 'react'
+-import { useFrame } from '@react-three/fiber'
++import { useMemo } from 'react'
+ import * as THREE from 'three'
+-import { terrainSurfaceY, landMask, biomeWeights, mulberry32 } from './terrainUtil'
+-
+-// ============================================================
+-// 草地系统真实核心（第 32 轮 A 新建：暂不挂载，Step A 只做"有"，看数、看线框）
+-// ------------------------------------------------------------
+-//  · 6 万实例 blade 交叉面片：草原带 4 万 + 林下 2 万（拒绝采样，按 biomeWeights 落位）；
+-//  · 顶点摆动（正弦风场 + 相位抖动，攒动感来自相位差而非大幅位移）；
+-//  · 干湿分区染色（世界坐标噪声：干黄 ↔ 湿绿；林下偏暗黄绿）；
+-//  · 光照只做「方向光漫反射近似 + 高度渐变 + 指数雾」，不吃 PBR、不吃阴影；
+-//  · 挂载前需在 TwinScene 中 <GrassField/>（当前未挂载，R32 不进入渲染帧）。
+-// 注意：本文件只消费 terrainUtil 纯函数（terrainSurfaceY/landMask/biomeWeights），
+-//       不反向影响地形 mesh 与贴地基准。
+-// ============================================================
+-
+-const GRASS_COUNT = 40000
+-const FLOOR_COUNT = 20000
+-
+-const VERT = /* glsl */ `
+-attribute vec3 aOffset;   // 世界落位（根部）
+-attribute vec3 aParam;    // x: 缩放 s, y: 相位, z: 朝向角
+-attribute float aKind;    // 0 草原 blade, 1 林下 blade
+-uniform float uTime;
+-uniform vec2 uWind;
+-varying float vShade;
+-varying float vKind;
+-varying float vFogDepth;
+-varying float vDry;
+-
+-float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+-
+-void main() {
+-  float s = aParam.x;
+-  float phase = aParam.y;
+-  float ang = aParam.z;
+-  float c = cos(ang), si = sin(ang);
+-  // 局部 blade：position.x ∈ [-0.5,0.5]（宽）, position.y ∈ [0,1]（高，基底已抬到 0）
+-  vec3 p = position;
+-  p.x *= (1.0 - uv.y * 0.85);          // 向上收窄成 blade
+-  p = vec3(p.x * c, p.y, -p.x * si + p.z * c);
+-  // 风摆：顶部摆幅大、根部不动；相位差制造攒动
+-  float sway = sin(uTime * 1.35 + phase + dot(aOffset.xz, uWind) * 0.02);
+-  float sway2 = sin(uTime * 2.30 + phase * 1.7);
+-  float bendAmt = uv.y * uv.y * s;
+-  p.x += (sway * 0.35 + sway2 * 0.08) * bendAmt;
+-  p.z += (sway * 0.22 - sway2 * 0.06) * bendAmt;
+-  vec3 world = aOffset + p * vec3(s * 0.55, s, s * 0.55);
+-  // 干湿分区（与片元同式，各自算一份避免 varying 精度问题可接受，此处只做明暗）
+-  float dry = hash21(floor(aOffset.xz * 0.05));
+-  vDry = dry;
+-  vKind = aKind;
+-  // 高度渐变：根暗、梢亮；叠加摆动微光
+-  vShade = (0.45 + 0.55 * uv.y) * (0.92 + 0.08 * sway);
+-  vec4 mv = modelViewMatrix * vec4(world, 1.0);
+-  vFogDepth = -mv.z;
+-  gl_Position = projectionMatrix * mv;
+-}
+-`
+-
+-const FRAG = /* glsl */ `
+-precision highp float;
+-varying float vShade;
+-varying float vKind;
+-varying float vFogDepth;
+-varying float vDry;
+-uniform float uDayF;
+-uniform vec3 uFogColor;
+-uniform float uFogDensity;
+-
+-void main() {
+-  // 干(黄) ↔ 湿(绿)；林下整体压暗偏黄
+-  vec3 dryCol = mix(vec3(0.30, 0.26, 0.10), vec3(0.20, 0.17, 0.07), vKind);
+-  vec3 wetCol = mix(vec3(0.10, 0.24, 0.08), vec3(0.07, 0.15, 0.07), vKind);
+-  vec3 col = mix(wetCol, dryCol, smoothstep(0.35, 0.75, vDry));
+-  col *= vShade;
+-  // 昼夜：只保留方向光漫反射近似的明暗比例
+-  col *= mix(vec3(0.16, 0.18, 0.24), vec3(1.0), uDayF);
+-  // 指数雾（与场景雾同式）
+-  float fogF = 1.0 - exp(-uFogDensity * uFogDensity * vFogDepth * vFogDepth);
+-  col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
+-  gl_FragColor = vec4(col, 1.0);
+-}
+-`
+-
+-interface GrassSet {
+-  geo: THREE.InstancedBufferGeometry
+-  mat: THREE.ShaderMaterial
+-  count: number
+-}
+-
+-function buildSet(kind: 0 | 1, count: number, seed: number): GrassSet {
+-  // 基底：两块交叉竖面（1×1，基底 y=0）
+-  const p1 = new THREE.PlaneGeometry(1, 1)
+-  p1.translate(0, 0.5, 0)
+-  const p2 = new THREE.PlaneGeometry(1, 1)
+-  p2.rotateY(Math.PI / 2)
+-  p2.translate(0, 0.5, 0)
+-  const base = new THREE.BufferGeometry()
+-  const posArr: number[] = []
+-  const uvArr: number[] = []
+-  const idxArr: number[] = []
+-  let vi = 0
+-  for (const p of [p1, p2]) {
+-    const pp = p.attributes.position as THREE.BufferAttribute
+-    const uu = p.attributes.uv as THREE.BufferAttribute
+-    const ii = p.index as THREE.BufferAttribute
+-    for (let i = 0; i < pp.count; i++) {
+-      posArr.push(pp.getX(i), pp.getY(i), pp.getZ(i))
+-      uvArr.push(uu.getX(i), uu.getY(i))
+-    }
+-    for (let i = 0; i < ii.count; i++) idxArr.push(ii.getX(i) + vi)
+-    vi += pp.count
+-  }
+-  base.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3))
+-  base.setAttribute('uv', new THREE.Float32BufferAttribute(uvArr, 2))
+-  base.setIndex(idxArr)
+-
+-  const geo = new THREE.InstancedBufferGeometry()
+-  geo.attributes.position = base.attributes.position
+-  geo.attributes.uv = base.attributes.uv
+-  geo.setIndex(base.getIndex())
+-  geo.instanceCount = count
+-
+-  const offsets = new Float32Array(count * 3)
+-  const params = new Float32Array(count * 3)
+-  const kinds = new Float32Array(count)
+-  const rnd = mulberry32(seed)
+-  let placed = 0
+-  let guard = 0
+-  while (placed < count && guard < count * 60) {
+-    guard++
+-    const x = (rnd() * 2 - 1) * 4550
+-    const z = (rnd() * 2 - 1) * 4550
+-    const L = landMask(x, z)
+-    if (L < 0.05) continue
+-    const w = biomeWeights(x, z)
+-    const key = kind === 0 ? w.grass : w.forest
+-    if (rnd() > key) continue
+-    const y = terrainSurfaceY(x, z)
+-    offsets[placed * 3] = x
+-    offsets[placed * 3 + 1] = y - 0.15 // 根部微埋，避免悬空
+-    offsets[placed * 3 + 2] = z
+-    const s = kind === 0 ? 1.1 + rnd() * 1.2 : 0.7 + rnd() * 0.8
+-    params[placed * 3] = s
+-    params[placed * 3 + 1] = rnd() * Math.PI * 2
+-    params[placed * 3 + 2] = rnd() * Math.PI
+-    kinds[placed] = kind
+-    placed++
+-  }
+-  geo.instanceCount = placed
+-  geo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(offsets, 3))
+-  geo.setAttribute('aParam', new THREE.InstancedBufferAttribute(params, 3))
+-  geo.setAttribute('aKind', new THREE.InstancedBufferAttribute(kinds, 1))
+-
+-  const mat = new THREE.ShaderMaterial({
+-    vertexShader: VERT,
+-    fragmentShader: FRAG,
+-    uniforms: {
+-      uTime: { value: 0 },
+-      uWind: { value: new THREE.Vector2(0.8, 0.6) },
+-      uDayF: { value: 1 },
+-      uFogColor: { value: new THREE.Color('#040911') },
+-      uFogDensity: { value: 0.00013 }, // C4：默认值随 App 场景雾
+-    },
+-    side: THREE.DoubleSide,
+-  })
+-  mat.customProgramCacheKey = () => 'grass-blade-v1'
+-  return { geo, mat, count: placed }
+-}
+ 
++// R33 v15 · sphere 复测（控制组）
+ export default function GrassField() {
+-  const grass = useMemo(() => buildSet(0, GRASS_COUNT, 1337), [])
+-  const floor = useMemo(() => buildSet(1, FLOOR_COUNT, 7331), [])
+-  const ref = useRef<THREE.Group>(null)
+-
+-  useFrame((state) => {
+-    const t = state.clock.elapsedTime
+-    for (const s of [grass, floor]) {
+-      const u = s.mat.uniforms as Record<string, { value: unknown }>
+-      ;(u.uTime as { value: number }).value = t
+-    }
+-  })
++  const sphere = useMemo(() => {
++    const g = new THREE.SphereGeometry(50, 32, 16)
++    const m = new THREE.MeshBasicMaterial({ color: 0xff0000 })
++    const mesh = new THREE.Mesh(g, m)
++    mesh.position.set(0, 50, 0)
++    return mesh
++  }, [])
+ 
+-  // 未挂载验证用：如需看数可临时在 TwinScene 挂 <GrassField/>（R32 默认不挂）
+-  return (
+-    <group ref={ref}>
+-      <mesh geometry={grass.geo} material={grass.mat} frustumCulled={false} />
+-      <mesh geometry={floor.geo} material={floor.mat} frustumCulled={false} />
+-    </group>
+-  )
++  return <primitive object={sphere} />
+ }
+-
+-
+diff --git a/twin/src/scene/terrainUtil.ts b/twin/src/scene/terrainUtil.ts
+index 05434bb..b2bd539 100644
+--- a/twin/src/scene/terrainUtil.ts
++++ b/twin/src/scene/terrainUtil.ts
+@@ -42,240 +42,35 @@ const smoothstep = (e0: number, e1: number, x: number) => {
+   return t * t * (3 - 2 * t)
+ }
+ 
+-// ---- 地形：开放外海 + 两相邻侧陆地（第 32 轮 A-round3：复杂地貌奇观）----
+-// 第 31 轮的海岸是单层 fbm 直线切割带（wobble ±320m），岬湾尺度单一；
+-// 本轮升级为「7 层噪声蜿蜒 + 大小高斯弧岬湾 + 双侧钳制 + 不规则离岸群岛/海岬」——
+-//  · 海域张角 100°（西岸线绕北角向南偏东 10°，不再是横平竖直的 90°）；
+-//  · 南(+z)、东(+x) 两【相邻侧】仍完全开放为纯海（无岸）；
+-//  · 北(-z)、西(-x) 为陆地，海岸线多尺度曲折（50m 微齿 ~ 3km 大岬湾）；
+-//  · 全部 9 机与升压站仍位于海中央（600m 机组净距硬约束，见 cap/bayCap）；
+-//  · 内陆远山加高锐化（300~550m 奇崛山体，雪冠载体更大）；
+-//  · 主峰直插云霄（1100m 级）+ 域扭曲山脊谷地 + 丘陵盆地；
+-//  · 峡湾水道深切北岸（长 1.6km、宽 220~560m，两壁陡峭，海岬变湾中岛）；
+-//  · 海蚀柱群（离岸峭岩，浪蚀奇观）；
+-//  · 海床仍只保留极低幅微地貌（±2m），贴地稳定。
+-// 注：R32-R34 系回退后重做（见 twin/docs/research/R32-R34-改造提示词.md），
+-//     因原 commit 不在本快照内，函数名与原实现未必逐字一致，但几何约束等价。
++// ---- 地形：开放外海 + 两相邻侧陆地（第 31 轮重构：用户验收回访）----
++// 第 29/30 轮的「以场心为圆心的径向海盆」被用户判为「盆地/湖泊，不是海」：
++//  四周全是等高海岸山脉，把海围成一口碗。本轮把世界改成「开放外海」——
++//  · 南(+z)、东(+x) 两【相邻侧】完全开放为纯海，海面一路延伸至世界边缘（无岸）；
++//  · 北(-z)、西(-x) 两【相邻侧】为陆地，海岸线带噪声蜿蜒（曲折包裹）；
++//  · 全部 9 机与升压站仍位于海中央、距海岸遥远（贴海平台）；
++//  · 海床只保留极低幅微地貌（±2m），贴地稳定、贴近真实海平台。
+ /** 海上风电场中心（保持旧取景重心；本版地形不再以之为圆心） */
+ export const FARM_CENTER = { x: -100, z: -640 } as const
+ 
+-/** 北向(-z)海岸线基准：dNorth = -z + wobbleN(x) - CN0，>0 为陆侧 */
+-const CN0 = 2100
+-/** 西向(-x)海岸线基准：dWest = -x + wobbleW(z) - CW0，>0 为陆侧 */
+-const CW0 = 1750
+-/** 西岸整体倾角：tan10°，绕北角拐点向南偏东 —— 海域张角由 90° 打开到 100° */
+-const TILT10 = 0.1763
+-/** 倾角枢轴 z（北角拐点，与北岸标称衔接） */
+-const TILT_PIVOT_Z = -2100
+-/** 海岸抬升基础带宽（round6：520→1400，海滩平原铺开；round7 起实际宽度按位置随机）。
+- *  岸线 0 等值线位置不动，机组净距不受影响。 */
+-export const RAMP_W = 1400
+-/** 有效过渡带宽（米）：低频噪声分区（0.55~1.55 倍，770~2170m）——
+- *  有的岸段短促、有的绵长，坡度和长度都因地而异（round7）。 */
+-function rampAt(x: number, z: number): number {
+-  return RAMP_W * (0.5 + 1.1 * N.fbm(x * 0.00035 + 3.3, z * 0.00035 - 8.8, 2))
+-}
+-/** 蜿蜒钳制（cap/bayCap）：向陆最多 -380m；向海（bay 侧）北岸 +200 / 西岸 +350 ——
+- *  与 CN0/CW0 联立保证：9 机 + 升压站处 landMask ≡ 0，且 600m 环内零沾陆
+- *  （实测最近沾陆约 700m＠T09——东南卫星小岛方向，本土岸线更远；
+- *  100m 粒度环扫；selftest R32-A1 断言锁定）。 */
+-const WOB_LAND = -380
+-const BAYCAP_N = 200
+-const BAYCAP_W = 350
+-
+-/** 5 层噪声蜿蜒基底（fbm 主波 + 次级 + 脊线岬角 + 微细节） */
+-function wobbleBase(x: number, s: number): number {
+-  const n5 = N.fbm(x * 0.00058 + s, 40.0, 3) - 0.5
+-  const n4 = N.fbm(x * 0.0016 + s * 2.1, 7.7, 3) - 0.5
+-  const n3 = N.ridged(x * 0.0009 + s * 0.7, 21.0, 2) - 0.5
+-  const n2 = N.fbm(x * 0.0042 + s * 3.7, 3.1, 2) - 0.5
+-  const n1 = N.fbm(x * 0.009 + s * 5.3, 9.4, 2) - 0.5   // 小岬湾（~110m）
+-  const n0 = N.fbm(x * 0.021 + s * 7.9, 1.2, 1) - 0.5   // 微齿（~50m）
+-  return n5 * 2 * 260 + n4 * 2 * 90 + n3 * 2 * 70 + n2 * 2 * 25 + n1 * 2 * 38 + n0 * 2 * 16
+-}
+-
+-/** 北岸蜿蜒：基底 + 高斯弧（西段岬/东段岬/中部湾），再双侧钳制 */
+-function wobbleN(x: number): number {
+-  const g1 = Math.exp(-(((x + 1500) / 700) ** 2)) * 220 // 西段岬（向海）
+-  const g2 = Math.exp(-(((x - 800) / 900) ** 2)) * 260  // 东段岬（向海）
+-  const bay = Math.exp(-(((x + 200) / 600) ** 2)) * 180 // 中部大湾（向陆收）
+-  const g3 = Math.exp(-(((x - 300) / 260) ** 2)) * 120  // 东段小岬（向海）
+-  const bay2 = Math.exp(-(((x - 1300) / 300) ** 2)) * 130 // 东段小湾（向陆收）
+-  const raw = wobbleBase(x, 5.7) + g1 + g2 + g3 - bay - bay2
+-  return Math.max(WOB_LAND, Math.min(BAYCAP_N, raw))
+-}
+-
+-/** 西岸蜿蜒：基底 + 高斯弧（北段岬/南段湾），再双侧钳制 */
+-function wobbleW(z: number): number {
+-  const g1 = Math.exp(-(((z + 1800) / 800) ** 2)) * 240 // 北段岬（向海）
+-  const bay = Math.exp(-(((z - 200) / 700) ** 2)) * 200  // 南段大湾（向陆收）
+-  const g2 = Math.exp(-(((z - 900) / 300) ** 2)) * 130  // 中段小岬（向海）
+-  const bay2 = Math.exp(-(((z + 800) / 350) ** 2)) * 120 // 北段小湾（向陆收）
+-  const raw = wobbleBase(z, -3.2) + g1 + g2 - bay - bay2
+-  return Math.max(WOB_LAND, Math.min(BAYCAP_W, raw))
+-}
+-
+-/** 北岸带符号距离（米，>0 陆侧，<0 海侧）：landMask 与 vCoast 的同一真值 */
+-export function dNorth(x: number, z: number): number {
+-  return -z + wobbleN(x) - CN0
+-}
+-/** 西岸带符号距离（米，>0 陆侧，<0 海侧）：含整体倾角项（海域张角 100°） */
+-export function dWest(x: number, z: number): number {
+-  return -x + wobbleW(z) - CW0 + (z - TILT_PIVOT_Z) * TILT10
+-}
+-
+-/** 离岸地貌：2 主岛 + 2 卫星小岛 + 1 北岸海岬（全部远离机组/电缆/升压站，见 selftest）。
+- *  p1/p2/p3 为轮廓角向谐波相位（3/5/8 瓣，±45% 半径起伏）—— 岛不再是正圆，
+- *  而是有岬有湾的不规则岛；卫星小岛构成群岛感。 */
+-export interface CoastFeature { x: number; z: number; r: number; h: number; p1: number; p2: number; p3: number }
+-export const ISLANDS: CoastFeature[] = [
+-  { x: 1700, z: 700, r: 260, h: 26, p1: 1.3, p2: 4.1, p3: 2.2 }, // 东南外海大岛（距 T09/电缆走廊 1353m）
+-  { x: -500, z: 1400, r: 200, h: 20, p1: 5.0, p2: 0.7, p3: 3.3 }, // 南外海小岛（100°倾角后东移，距 T07 约 1400m）
+-]
+-/** 卫星小岛（东南大岛附属，纯海中央，与电缆/机组均 >800m） */
+-export const SATS: CoastFeature[] = [
+-  { x: 2100, z: 1100, r: 70, h: 9, p1: 2.0, p2: 1.1, p3: 5.4 },
+-  { x: 1300, z: 300, r: 55, h: 7, p1: 4.4, p2: 2.8, p3: 0.5 },
+-]
+-export const HEADLANDS: CoastFeature[] = [
+-  { x: -1250, z: -2400, r: 480, h: 42, p1: 0, p2: 0, p3: 0 }, // 北岸向南突出的海岬（距 T01 1218m）
+-]
+-/** 主峰（直插云霄）+ 次峰：深陆无人区，只做视觉奇观，不触碰任何约束 */
+-export interface Peak { x: number; z: number; r: number; h: number }
+-export const PEAKS: Peak[] = [
+-  { x: -2700, z: -3900, r: 800, h: 780 }, // 主峰（round11：r600→800、h900→780，
+-  { x: -1600, z: -4200, r: 600, h: 470 }, // 次峰（同上）—— 宽肩缓脊，合计仍 1000m 级，
+-]                                         // 不再是“插在地上”的针，只做体量不做高度竞赛
+-/** 丘陵盆地：台地带平滑洼陷（纯视觉起伏，深陆内部） */
+-export interface Basin { x: number; z: number; r: number; depth: number }
+-export const BASINS: Basin[] = [
+-  { x: -2300, z: -2500, r: 520, depth: 30 },
+-  { x: 1400, z: -3300, r: 440, depth: 26 },
+-]
+-/** 峡湾水道：由口(A)向源头(B)深切北岸。只做减法（carve 陆地），机组侧恒为海，
+- *  不可能凭空造陆 —— 600m 净距约束天然不受威胁。 */
+-export const FJORD_A = { x: -400, z: -1750 } // 口（可靠海域，距 T01 约 580m）
+-export const FJORD_B = { x: -700, z: -3250 } // 源头（深陆）
+-function fjordCarve(x: number, z: number): number {
+-  const vx = FJORD_B.x - FJORD_A.x, vz = FJORD_B.z - FJORD_A.z
+-  const t = Math.max(0, Math.min(1, ((x - FJORD_A.x) * vx + (z - FJORD_A.z) * vz) / (vx * vx + vz * vz)))
+-  const d = Math.hypot(x - FJORD_A.x - vx * t, z - FJORD_A.z - vz * t)
+-  return 1 - smoothstep(110, 280, d) // 通道内全切（宽 220m），边缘 280m 羽化成峭壁
+-}
+-/** 海蚀柱群：离岸峭岩（小半径高锥，浪蚀奇观；全部纯海中央） */
+-export const STACKS: CoastFeature[] = [
+-  { x: -1000, z: -1700, r: 45, h: 20, p1: 1.0, p2: 2.0, p3: 3.0 }, // 西岬外柱（岬前 467m 海中）
+-  { x: -1150, z: -1500, r: 38, h: 16, p1: 3.0, p2: 5.0, p3: 1.0 }, // 西岬外柱二
+-  { x: 2400, z: 400, r: 48, h: 18, p1: 2.0, p2: 4.0, p3: 0.0 },    // 东外海孤柱
+-]
+-/** 岛极坐标：角向谐波半径 rr(θ)，设色 mask 与锥形抬升共用（同一真值） */
+-function islandPolar(f: CoastFeature, x: number, z: number): { d: number; rr: number } {
+-  const dx = x - f.x, dz = z - f.z
+-  const d = Math.hypot(dx, dz)
+-  const th = Math.atan2(dz, dx)
+-  const rr = f.r * (1 + 0.22 * Math.sin(3 * th + f.p1) + 0.14 * Math.sin(5 * th + f.p2) + 0.09 * Math.sin(8 * th + f.p3))
+-  return { d, rr }
+-}
+-/** 全部离岸地貌（二主岛二卫岛一海岬三海蚀柱）：mask 与抬升共用此表 */
+-const ISLES: CoastFeature[] = [...ISLANDS, ...SATS, ...HEADLANDS, ...STACKS]
+-
+-/** 方向性陆地基底（北/西，不含岛——岛只做锥形抬升+设色，不触发内陆分带） */
+-function landBase(x: number, z: number): number {
+-  const rw = rampAt(x, z)
+-  const wN = smoothstep(0, rw, dNorth(x, z))
+-  const wW = smoothstep(0, rw, dWest(x, z))
+-  return Math.max(wN, wW) * (1 - fjordCarve(x, z))
+-}
+-
+-/** 海岸过渡场（与陆地基底同式，不含岛）：vCoast / Step B 海岸距离场的同一真值 */
+-export function coastT(x: number, z: number): number {
+-  return landBase(x, z)
+-}
++/** 北向(-z)海岸线基准（-z 大于此值才进入陆地；越往北越高） */
++const COAST_N = 1720
++/** 西向(-x)海岸线基准（-x 大于此值才进入陆地；越往西越高） */
++const COAST_W = 1420
++/** 海岸线蜿蜒噪声幅度（让岸边曲折，而非直线） */
++const COAST_WOBBLE = 320
+ 
+ /**
+  * 陆地权重 0..1：0=开放海床，1=陆地。北/西两个方向各自产生一片陆地，
+  * 用平滑 max 组合 —— 任一方向靠陆即抬升。南/东即保持 0（开放海）。
+- * 多尺度蜿蜒 + 高斯弧岬湾破除「直线切割」的切割带感；离岸岛叠加设色 mask。
++ * 噪声使海岸线蜿蜒曲折，破除「直线切割」的切割带感。
+  */
+ export function landMask(x: number, z: number): number {
+-  let m = landBase(x, z)
+-  for (const f of ISLES) {
+-    const { d, rr } = islandPolar(f, x, z)
+-    if (d < rr + 120) m = Math.max(m, 1 - smoothstep(rr * 0.45, rr + 80, d))
+-  }
+-  return m
+-}
+-
+-/** 雪线（米）：山地带中世界高度超过此值染雪冠（GPU 端，见 WorldTerrain v4）。
+- *  round5：205→300；round10：300→380 —— 只属于主峰/次峰/最高山脊，雪下露岩重见天日。 */
+-export const SNOW_LINE = 380
+-
+-/** 确定性 RNG（草地落位与 selftest 共用，保证"采样验证"与"真实落位"同分布） */
+-export function mulberry32(seed: number) {
+-  let a = seed >>> 0
+-  return () => {
+-    a |= 0
+-    a = (a + 0x6d2b79f5) | 0
+-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+-  }
+-}
+-
+-/** 草地拒绝采样命中数（kind 0=草原带 / 1=林下）：与 grassField.buildSet 同条件
+- *  （landMask≥0.05 且按 biome 权重接受）。默认 2 万次试投，命中 >1% 即对应
+- *  生物群系带真实存在、全量 6 万可按同分布铺满。 */
+-export function grassSampleHits(kind: 0 | 1, tries = 20000): number {
+-  const rnd = mulberry32(kind === 0 ? 1337 : 7331)
+-  let hits = 0
+-  for (let i = 0; i < tries; i++) {
+-    const x = (rnd() * 2 - 1) * 4550
+-    const z = (rnd() * 2 - 1) * 4550
+-    if (landMask(x, z) < 0.05) continue
+-    const w = biomeWeights(x, z)
+-    if (rnd() > (kind === 0 ? w.grass : w.forest)) continue
+-    hits++
+-  }
+-  return hits
+-}
+-
+-/** 六类生物群系权重（CPU 端，与 WorldTerrain v4 GPU 分带同式）：沙岸/潮带/草原/林地/缓丘/远山。
+- *  供贴地物（草地散布等）与 selftest 消费；海面（land≈0）返回全零。 */
+-export interface BiomeWeights {
+-  sand: number; tidal: number; grass: number; forest: number; hill: number; mountain: number
+-}
+-export function biomeWeights(x: number, z: number): BiomeWeights {
+-  const L = landMask(x, z)
+-  if (L <= 0.001) return { sand: 0, tidal: 0, grass: 0, forest: 0, hill: 0, mountain: 0 }
+-  const sand = 1 - smoothstep(0.06, 0.16, L)
+-  const tidal = smoothstep(0.05, 0.12, L) * (1 - smoothstep(0.16, 0.28, L))
+-  const grass = smoothstep(0.14, 0.30, L) * (1 - smoothstep(0.45, 0.62, L))
+-  const forest = smoothstep(0.38, 0.55, L) * (1 - smoothstep(0.68, 0.82, L))
+-  const hill = smoothstep(0.60, 0.75, L) * (1 - smoothstep(0.85, 0.95, L))
+-  const mountain = smoothstep(0.82, 0.93, L)
+-  // 主导群系对比增强（pow 1.25 再归一，与 GPU 同式）：过渡带不再"混在一起看不真切"
+-  const ce = 1.25
+-  const eSand = sand ** ce, eTidal = tidal ** ce, eGrass = grass ** ce
+-  const eForest = forest ** ce, eHill = hill ** ce, eMtn = mountain ** ce
+-  const s = eSand + eTidal + eGrass + eForest + eHill + eMtn
+-  // 中间过渡带各分量和可能 <1（分带交叠设计），归一保证"权重"语义
+-  if (s < 1e-6) return { sand: 0, tidal: 0, grass: 0, forest: 0, hill: 0, mountain: 0 }
+-  return { sand: eSand / s, tidal: eTidal / s, grass: eGrass / s, forest: eForest / s, hill: eHill / s, mountain: eMtn / s }
+-}
+-
+-/** 高度网格烘焙（Step C1 地形投影用）：size² 采样 terrainSurfaceY，
+- *  data[j*size+i] ↔ x=(i/(size-1)-0.5)*extent, z=(j/(size-1)-0.5)*extent，
+- *  与 GPU 端 uv = xz/extent+0.5 同式（v=0 ↔ z=-extent/2，DataTexture flipY=false）。
+- *  纯真值采样，不改变任何地形 —— 陆地冻结令下允许新增的只读消费。 */
+-export function bakeHeightGrid(size: number, extent: number): { size: number; extent: number; data: Float32Array } {
+-  const data = new Float32Array(size * size)
+-  for (let j = 0; j < size; j++) {
+-    const z = (j / (size - 1) - 0.5) * extent
+-    for (let i = 0; i < size; i++) {
+-      data[j * size + i] = terrainSurfaceY((i / (size - 1) - 0.5) * extent, z)
+-    }
+-  }
+-  return { size, extent, data }
++  const wobN = (N.fbm(x * 0.00058 + 5.7, 40.0, 3) - 0.5) * 2 * COAST_WOBBLE
++  const wobW = (N.fbm(90.0, z * 0.00058 - 3.2, 3) - 0.5) * 2 * COAST_WOBBLE
++  // -z / -x 越大越靠陆；用较陡的 smoothstep 形成清晰海岸线
++  const wN = smoothstep(COAST_N, COAST_N + 480, -z + wobN)
++  const wW = smoothstep(COAST_W, COAST_W + 460, -x + wobW)
++  return Math.max(wN, wW)
+ }
+ 
+ /**
+@@ -288,45 +83,18 @@ export function terrainSurfaceY(x: number, z: number): number {
+ }
+ 
+ export function terrainHeight(x: number, z: number): number {
+-  const land = landBase(x, z)
++  const land = landMask(x, z)
+   // 海床基准（低，贴近真实海平台）+ 极低幅微地貌（不是完全平面）
+   const bed = (N.fbm(x * 0.0009, z * 0.0009, 3) - 0.5) * 4.0
+   let h = 2.0 + bed
+   if (land > 0) {
+-    // 分带（round7 全程缓坡 + round9 还回远山）：沙带 → 台地拉长 → 高地【线性登山】
+-    // （全程等坡、无后墙；上限 400m 级 + 高矮分区；近岸 1km 仍是滩原丘陵）
++    // 分带：近岸沙带(矮、平缓) → 森林台地(中) → 内陆远山(高、噪声起伏)
+     const sand = smoothstep(0.0, 0.28, land)      // 近海黄沙带
+-    const forest = smoothstep(0.20, 0.80, land)   // 森林台地（拉长，盖住中段）
+-    const mountain = clamp01((land - 0.55) / 0.45) // 内陆高地（线性登山）
+-    const roll = (N.fbm(x * 0.0021 + 8.8, z * 0.0021 - 3.3, 2) - 0.5) * 2 // 台地丘陵起伏 ±12m
+-    const crag = N.ridged(x * 0.00032 + 3.1, z * 0.00032 - 1.4, 4)        // 主峰（锐化）
+-    const crag2 = N.ridged(x * 0.0011 - 7.7, z * 0.0011 + 4.2, 2)         // 次峰（破碎感）
+-    const warp = (N.fbm(x * 0.0004 - 11.0, z * 0.0004 + 5.0, 3) - 0.5) * 1600 // 域扭曲（山脊走弯）
+-    const ridge = N.ridged(x * 0.0009 + warp * 0.0009 + 3.1, z * 0.0009 - 1.4, 3) // 曲折山脊谷地
+-    const mAmp = 0.85 + 0.6 * N.fbm(x * 0.0002 - 5.5, z * 0.0002 + 2.2, 2) // 山系高矮分区
++    const forest = smoothstep(0.20, 0.72, land)   // 森林台地
++    const mountain = smoothstep(0.55, 1.0, land)  // 内陆远山
+     h += sand * 10
+-    h += forest * (34 + 20 * N.ridged(x * 0.0005 + 1.7, z * 0.0005 - 9.3, 3) + 12 * roll)
+-    h += mountain * (90 + 170 * crag + 70 * crag2 + 70 * ridge) * mAmp
+-    for (const b of BASINS) { // 丘陵盆地（平滑洼陷）
+-      const db = Math.hypot(x - b.x, z - b.z)
+-      if (db < b.r) h -= b.depth * (1 - smoothstep(0, b.r, db))
+-    }
+-  }
+-  for (const pk of PEAKS) { // 主峰/次峰（round11：宽肩缓脊 + 基座裙边，坐进山脊）
+-    const dp = Math.hypot(x - pk.x, z - pk.z)
+-    if (dp < pk.r * 2.6) {
+-      const prof = 1 - smoothstep(0, pk.r, dp)
+-      const gully = (N.ridged(x * 0.006 + pk.x * 0.01, z * 0.006 - pk.z * 0.01, 3) - 0.5) * 2
+-      h += pk.h * prof ** 1.05 + pk.h * 0.14 * gully * prof
+-      // 裙边：峰脚向外 1.2r 处垫高 0.32h、2.6r 处归零 —— 峰从山脊里“长出来”，不断层
+-      h += pk.h * 0.32 * smoothstep(pk.r * 0.3, pk.r * 1.2, dp) * (1 - smoothstep(pk.r * 1.2, pk.r * 2.6, dp))
+-    }
+-  }
+-  // 离岸岛/海岬（第 32 轮）：不规则轮廓锥形抬升（中心全高 → rr+180m 处归零），
+-  // 与主体陆地自然衔接；岛只走本抬升，不触发上面的内陆分带（避免岛变高山）。
+-  for (const f of ISLES) {
+-    const { d, rr } = islandPolar(f, x, z)
+-    if (d < rr + 180) h += f.h * (1 - smoothstep(0, rr + 180, d))
++    h += forest * (34 + 20 * N.ridged(x * 0.0005 + 1.7, z * 0.0005 - 9.3, 3))
++    h += mountain * (60 + 190 * N.ridged(x * 0.00032 + 3.1, z * 0.00032 - 1.4, 4))
+   }
+   // 升压站局地再压平（站体仍在海中央）
+   const dS = Math.hypot(x - SUBSTATION.x, z - SUBSTATION.z)
