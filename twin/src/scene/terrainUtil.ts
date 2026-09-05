@@ -256,42 +256,16 @@ export function terrainHeight(x: number, z: number): number {
   const bed = (N.fbm(x * 0.0009, z * 0.0009, 3) - 0.5) * 4.0
   let h = 2.0 + bed
 
-  // R34 · 离岸小岛 / 海岬必须先抬高度（在海侧早 return 之前），
-  // 否则 landMask 染成陆地但 h≈2m → 黑色"漂浮片"。先按纯圆形
-  // 抬到位（h 顶峰 16-26m），R32 陆地分支回不来就走这路。
-  for (const isl of ISLANDS) {
-    const d = Math.hypot(x - isl.cx, z - isl.cz)
-    if (d < isl.r) {
-      const peak = 1 - smoothstep(0, isl.r, d)
-      h += peak * isl.h
-    }
-  }
-  for (const hd of HEADLANDS) {
-    const d = Math.hypot(x - hd.cx, z - hd.cz)
-    if (d < hd.r) {
-      const peak = 1 - smoothstep(0, hd.r, d)
-      h += peak * hd.h
-    }
-  }
-
   const dn = dNorth(x, z)
   const dw = dWest(x, z)
-  // R34 离岸小岛/海岬：landMask 已是陆地（mask≈0.95），但 ds 仍可能 ≤0
-  // ——我们已经在上面加过高度，这里允许走"陆地分支"继续叠加岸上地貌
-  // 让岛/岬的过渡带与主体陆地更自然衔接。
-  const onIslandOrCape = ISLANDS.some((s) => Math.hypot(x - s.cx, z - s.cz) < s.r)
-    || HEADLANDS.some((s) => Math.hypot(x - s.cx, z - s.cz) < s.r)
-  if (dn <= 0 && dw <= 0 && !onIslandOrCape) {
-    // 纯开放海（既非岛也非岬）才走快路
+  if (dn <= 0 && dw <= 0) {
+    // 开放海：直出（波/浪由片元处理）
     return flattenSubstation(x, z, h)
   }
 
   // —— 陆地：由「到岸距离 ds」分带塑造地貌（米级连续过渡）——
   // ds：陆侧到最近海岸线零集的距离
-  let ds = dn > 0 && dw > 0 ? Math.min(dn, dw) : Math.max(dn, dw)
-  // R34 离岸小岛/海岬：landMask 已染陆地，但 ds 可能 ≤0，
-  // ——强制 ds ≥ 6m，让 R32 陆地分支的"1) 滩面 1.7m"+"2) 沙丘 6m" 至少给到位
-  if (onIslandOrCape && ds < 6) ds = 6
+  const ds = dn > 0 && dw > 0 ? Math.min(dn, dw) : Math.max(dn, dw)
 
   // 沿岸地貌性格：低=沙岸，高=岩岸（值由两条脊线噪声交替，连续）
   const rock = coastalRock(x, z)
@@ -321,6 +295,22 @@ export function terrainHeight(x: number, z: number): number {
   const mtn = 45 + 175 * N.ridged(x * 0.00019 + 3.3, z * 0.00016 - 8.8, 4)
     + 26 * N.ridged(x * 0.0011 - 5.1, z * 0.0009 + 1.6, 4)
   h += mtn * smoothstep(900, 2400, ds)
+
+  // R34 · 离岸小岛 / 海岬的额外高度（与 R32 主体算法独立叠加）
+  for (const isl of ISLANDS) {
+    const d = Math.hypot(x - isl.cx, z - isl.cz)
+    if (d < isl.r) {
+      const peak = 1 - smoothstep(0, isl.r, d)
+      h += peak * isl.h
+    }
+  }
+  for (const hd of HEADLANDS) {
+    const d = Math.hypot(x - hd.cx, z - hd.cz)
+    if (d < hd.r) {
+      const peak = 1 - smoothstep(0, hd.r, d)
+      h += peak * hd.h
+    }
+  }
 
   return flattenSubstation(x, z, h)
 }
