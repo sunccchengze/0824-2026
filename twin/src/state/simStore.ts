@@ -76,10 +76,11 @@ const randomAnomalyGap = () => 2 + Math.floor(Math.random() * 4) // 2~5 天
 const initialGap = randomAnomalyGap()
 
 export const useSim = create<SimState>((set, get) => ({
-  // 默认进入时刻改为 t=6（日出后高清高功率段）：与《日间氛围_参考基线》
-  // 06:12 帧一致，HUD 首屏即展示 ~14MW 高功率 + 低角度晨光最长光影梯度；
-  // 避免默认 t=10 落在日内风速低谷（~5.6MW）让人误以为“功率被降低”。
-  tHours: 6,
+  // 默认进入时刻：t=14（下午 14:00）—— R35 LightRig 改完后
+  // t=6 落在晨昏带下界（fd≈0）→ 主灯关闭、整图变暗；t=14 时
+  // 太阳正午（fd=1）主灯全亮、阴影锐利，与 R32 hero 视觉基线一致。
+  // 备注：t=10 落在风速低谷会让首屏 HUD 数字显低，所以避开。
+  tHours: 14,
   playing: true,
   togglePlay: () => set((s) => ({ playing: !s.playing })),
   seek: (h) => set({ tHours: ((h % 24) + 24) % 24 }),

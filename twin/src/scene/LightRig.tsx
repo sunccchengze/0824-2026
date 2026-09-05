@@ -71,23 +71,32 @@ export default function LightRig() {
     const dn = dayNight(tmp.simT)
     // smoothstep 缓入晨昏，日出/日落有 2-3 秒（真实时间）的渐变而非突变
     const fd = dn.dayF * dn.dayF * (3 - 2 * dn.dayF)
-    const mf = dn.moonF * dn.moonF * (3 - 2 * dn.moonF)
     skyState.dayF = fd
     skyState.sunDir.set(...dn.sunDir)
     skyState.moonDir.set(...dn.moonDir)
     const night = 1 - fd
 
     if (sunRef.current) {
-      // 方向：太阳权重 fd、月亮权重 mf 连续交叉——日落瞬间合光仍偏西（余晖），
-      // 入夜渐交棒月亮；两臂在晨昏交界同点（对日点），无方位跳变
-      tmp.dir.set(
-        dn.sunDir[0] * fd + dn.moonDir[0] * mf,
-        Math.max(0.045, dn.sunDir[1] * fd + dn.moonDir[1] * mf),
-        dn.sunDir[2] * fd + dn.moonDir[2] * mf,
-      ).normalize()
-      const R = 2600
-      sunRef.current.position.set(TARGET.x + tmp.dir.x * R, TARGET.y + tmp.dir.y * R, TARGET.z + tmp.dir.z * R)
-      sunRef.current.intensity = 0.34 + 1.6 * fd
+      // 方向：纯太阳（与月亮彻底解耦 —— 月亮走自己的轨迹 moonDir 由 SkyAurora
+      // / WorldTerrain 直接消费）。太阳降到地平下时主灯关掉，避免从下方打光。
+      // 月光走 WorldTerrain 的 fragment（月光镜面 + 月光带）+ SkyAurora 的月盘，
+      // 不再与主灯混方向。
+      // 阈值 fd>0.15（晨昏带下界）开主灯 + 阴影；fd≤0.15 关。低角度阴影拉得过长，
+      // 物理上也本该"清晨阴影变软"——这里直接关掉，晨昏靠 hemisphere+fillA/B/C 撑。
+      if (fd > 0.15) {
+        tmp.dir.set(dn.sunDir[0], Math.max(0.05, dn.sunDir[1]), dn.sunDir[2]).normalize()
+        const R = 2600
+        sunRef.current.position.set(TARGET.x + tmp.dir.x * R, TARGET.y + tmp.dir.y * R, TARGET.z + tmp.dir.z * R)
+        // fd 0.15..0.30 之间做强度淡入，避免晨昏带阴影"砰"地出现
+        const sunF = Math.min(1, (fd - 0.15) / 0.15)
+        sunRef.current.intensity = (0.34 + 1.6 * fd) * sunF
+        sunRef.current.castShadow = shadowOn
+      } else {
+        // 太阳在地平下或晨昏带下界：主灯位置摆到场景远下方、强度置 0、关阴影
+        sunRef.current.position.set(TARGET.x, TARGET.y - 100, TARGET.z)
+        sunRef.current.intensity = 0
+        sunRef.current.castShadow = false
+      }
       tmp.col.setHex(0xcfe4ff).lerp(new THREE.Color(0xf6fbff), fd)
       sunRef.current.color.copy(tmp.col)
     }

@@ -428,16 +428,29 @@ export function dayNight(tHours: number): {
   const sz = -Math.cos(az) * Math.cos(el)
   const sy = Math.sin(el)
   const dayF = Math.min(1, Math.max(0, (elDeg + 4) / 16)) // 连续，触底 0
-  // 月亮=日对点：方位 az+180、仰角 −38·sinθ（夜正昼负），日落/日出天然衔接
-  const elM = (38 * Math.sin(th) * Math.PI) / 180
+  // 月亮=日对点：方位 az+180、仰角 = -elDeg（与太阳真正反相，永远异号）
+  // 旧版 elM = 38·sinθ 是与太阳同相位的，导致月亮和太阳同起同落（"诡异轨迹"的根因）
+  // 现在：日出 5:24 时太阳在东-地平 → 月亮在西-地平下；正午太阳高 54° → 月亮低 -54°
+  // 18:36 日落西 → 月亮升到东-地平下一点点；午夜 0:00 太阳正下 → 月亮正上 54°（满月最亮）
+  const elMrad = -el                    // 仰角严格取反（弧度）
+  const elMsin = Math.sin(elMrad)
+  const elMcos = Math.cos(elMrad)
   const azM = az + Math.PI
+  // 真实方向向量：sx/sy/sz 公式同太阳，仰角取负，方位 +180°
+  // 月亮 Y 通道特殊：物理上应当允许负值（地平线下），但 SkyAurora shader
+  // 用 moonDir.y ≥ -0.02 决定可见性，所以这里不抬到地平上。
+  const moonDir: [number, number, number] = [
+    Math.sin(azM) * elMcos,
+    elMsin,
+    -Math.cos(azM) * elMcos,
+  ]
   const moonF = Math.min(1, Math.max(0, (-elDeg + 3) / 18))
   return {
     dayF,
     moonF,
     sunElDeg: elDeg,
     sunDir: [sx, sy, sz],
-    moonDir: [Math.sin(azM) * Math.cos(elM), Math.max(0.06, Math.sin(elM)), -Math.cos(azM) * Math.cos(elM)],
+    moonDir,
   }
 }
 

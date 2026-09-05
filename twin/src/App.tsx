@@ -157,7 +157,7 @@ export default function App() {
             <div className="splash-logo">AEOLUS TWIN</div>
             <div className="splash-sub">风电场偏航优化 · 数字孪生系统</div>
             <div className="splash-bar"><i /></div>
-            <em>正在装配全息场景 · 零外部请求</em>
+            <em>正在烘焙海礁与毛细波 · R37 海洋终极</em>
           </div>
         )}
         {fatal && (

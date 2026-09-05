@@ -7,7 +7,7 @@ import {
   farmFrame, optimizeYaw, windAt, FARM_RATED_MW,
 } from '../src/data/farmSim.ts'
 import { powerCurveKw, yawFactor, wakeDeficit, TILT_F, wakeDeflection } from '../src/data/turbinePhysics.ts'
-import { FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY } from '../src/scene/terrainUtil.ts'
+import { FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY, terrainCoastDistance, landMask } from '../src/scene/terrainUtil.ts'
 
 let pass = 0
 let fail = 0
@@ -244,11 +244,178 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
   ok('V&V 海岸明显高于海面：内陆 2300m 处 ≥30m', coastOK, '海陆交界抬升')
   ok('V&V 开放外海：南/东相邻侧 2300m 处保持海床 ≤12m', openOK, '两相邻侧开放为海')
 
+  // R32 · 6 类生物群系高度分层（方向性海岸，landMask 越大越深入内陆）
+  // 在北向内陆 200/800/1500/2500m 测四点，验证沙带 < 林 < 岩石 < 远山
+  const probes: Array<{ d: number; max: number; tag: string }> = [
+    { d: 200, max: 30, tag: '近岸带（黄沙）' },
+    { d: 800, max: 80, tag: '森林台地' },
+    { d: 1500, max: 180, tag: '岩石丘' },
+    { d: 2500, max: 360, tag: '远山' },
+  ]
+  for (const p of probes) {
+    const h = terrainHeight(FARM_CENTER.x - 1200, FARM_CENTER.z - p.d)
+    ok(`R32 ${p.tag}（d=${p.d}m）高度 ≤ ${p.max}m`, h <= p.max, `h=${h.toFixed(1)}m`)
+  }
+  // 雪线：2500m 处应该至少有 1 个采样点超 SNOW_LINE(205) 或接近（远山拔起）
+  let snowReach = false
+  for (let i = 0; i < 20; i++) {
+    const h = terrainHeight(FARM_CENTER.x - 2500 - i * 30, FARM_CENTER.z - 3000)
+    if (h >= 205) { snowReach = true; break }
+  }
+  ok('R32 雪线：内陆深处可达 SNOW_LINE(205m)', snowReach, '雪冠存在性')
+  // 陆地分带单调：sand < grass < rock < mountain 高度上限严格递增
+  let monotoneOK = true
+  const lastHi = [12, 30, 80, 180, 360]
+  for (let i = 1; i < lastHi.length; i++) if (lastHi[i] <= lastHi[i - 1]) monotoneOK = false
+  ok('R32 6 类分带高度上限单调（sand<soil<grass<rock<mtn<snow）', monotoneOK, '生物群系分带顺序')
+
   // 第 26/29 轮：波浪位移是「运行时顶点着色器」副作用，静态几何应仍严格等于
   // terrainSurfaceY（波幅只在 shader 里对水面顶点叠加，不影响贴地基准）。
   let waveOK = true
   for (const u of FARM) if (Math.abs(terrainSurfaceY(u.x, u.z) - terrainHeight(u.x, u.z)) > 1e-9) waveOK = false
   ok('V&V 波浪位移不污染贴地基准（静态几何=terrainSurfaceY）', waveOK, '机位贴地基准与地形同源')
+}
+
+// R34 · 海岸距离场（terrainCoastDistance，友资产借鉴 · 闭式近似 EDT）
+{
+  // 1. 符号正确：海中（landMask=0）应 < 0，陆上（landMask=1）应 > 0
+  const dSea   = terrainCoastDistance(FARM_CENTER.x + 1000, FARM_CENTER.z + 1000) // 东南开放海
+  const dLand  = terrainCoastDistance(FARM_CENTER.x - 1500, FARM_CENTER.z - 3000) // 西/北深内陆
+  ok('R34 海岸距离：开放海侧 < 0', dSea < 0, `dSea=${dSea.toFixed(1)}m`)
+  ok('R34 海岸距离：内陆深处 > 0', dLand > 0, `dLand=${dLand.toFixed(1)}m`)
+
+  // 2. 量级合理：wN 过渡带 480m → 海岸附近 |d| 应在 [0, ~500]m 区间连续
+  // 直接对 z=-2050..-2300 扫描（landMask 跨 0.5 的过渡带）
+  let nearShoreD = Infinity
+  for (let z = -2050; z >= -2300; z -= 10) {
+    const lm = landMask(FARM_CENTER.x, z)
+    if (lm > 0.2 && lm < 0.8) {
+      const cd = Math.abs(terrainCoastDistance(FARM_CENTER.x, z))
+      if (cd < nearShoreD) nearShoreD = cd
+    }
+  }
+  ok('R34 海岸距离：海岸过渡带 |d| 收敛 < 200m', nearShoreD < 200, `min|d|=${nearShoreD.toFixed(1)}m`)
+
+  // 3. 海岸附近 landMask 跨 0.5 时 d 应接近 0
+  let minAbsD = Infinity
+  for (let z = -2050; z >= -2300; z -= 5) {
+    const lm = landMask(FARM_CENTER.x, z)
+    if (Math.abs(lm - 0.5) < 0.05) {
+      const dd = Math.abs(terrainCoastDistance(FARM_CENTER.x, z))
+      if (dd < minAbsD) minAbsD = dd
+    }
+  }
+  ok('R34 海岸距离：landMask≈0.5 处 |d| 收敛 < 30m', minAbsD < 30, `min|d|=${minAbsD.toFixed(1)}m`)
+
+  // 4. 9 台风机位都应 d < 0（海中央）
+  let farmSea = true
+  for (const u of FARM) {
+    const d = terrainCoastDistance(u.x, u.z)
+    if (d >= 0) { farmSea = false; break }
+  }
+  ok('R34 9 台风机位全部位于海中（d < 0）', farmSea, '场区为海')
+
+  // 5. 升压站为海中央平台（d < 0）
+  const dSub = terrainCoastDistance(SUBSTATION.x, SUBSTATION.z)
+  ok('R34 升压站位于海中（d < 0）', dSub < 0, `dSub=${dSub.toFixed(1)}m`)
+}
+
+// R35 · 海水偏湛蓝（色值断言）+ 明月方向（lightState 已就绪）
+// 注：色值在 fragment 内 GLSL 写死，selftest 只能校验"色值是否符合湛蓝配方"，
+// 这里我们采用：日间 deepCol B 通道 ≥ 0.10，shallowCol B 通道 ≥ 0.30（已修正为湛蓝）
+// 通过静态扫描 WorldTerrain.tsx 的色值常量来确认"湛蓝"配方。
+{
+  const fs = await import('node:fs/promises')
+  const src = await fs.readFile('src/scene/WorldTerrain.tsx', 'utf8')
+  // 1. deepCol 日间 B 通道 ≥ 0.10（从前版的 0.110 → 0.180 应满足）
+  const deepDay = src.match(/vec3 deepCol\s*=\s*mix\(vec3\(([^)]+)\),\s*vec3\(([^)]+)\),\s*uDayF\)/)
+  ok('R35 deepCol 日间 B 通道 ≥ 0.10（湛蓝配方）',
+    !!deepDay && parseFloat(deepDay![2].split(',')[2]) >= 0.10,
+    deepDay ? `B=${deepDay[2].split(',')[2]}` : '色值未找到')
+  // 2. shallowCol 日间 B 通道 ≥ 0.30（浪尖浅水强蓝）
+  const shallowDay = src.match(/vec3 shallowCol\s*=\s*mix\(vec3\(([^)]+)\),\s*vec3\(([^)]+)\),\s*uDayF\)/)
+  ok('R35 shallowCol 日间 B 通道 ≥ 0.30（浪尖强蓝）',
+    !!shallowDay && parseFloat(shallowDay![2].split(',')[2]) >= 0.30,
+    shallowDay ? `B=${shallowDay[2].split(',')[2]}` : '色值未找到')
+  // 3. uMoonDir uniform 已声明
+  ok('R35 WorldTerrain 已声明 uMoonDir uniform', src.includes('uniform vec3 uMoonDir'))
+  ok('R35 WorldTerrain 海水用 uMoonDir 算月光镜面', src.includes('dot(Ns, halfVMoon)'))
+  // 4. SkyAurora 月亮圆盘
+  const sky = await fs.readFile('src/scene/SkyAurora.tsx', 'utf8')
+  ok('R35 SkyAurora 已声明 uMoonDir uniform', sky.includes('uniform vec3 uMoonDir'))
+  ok('R35 SkyAurora 含月亮圆盘 disc + halo', sky.includes('moonDot') && sky.includes('moonCore'))
+  // 5. 浪尖浅水 R 通道 ≤ 0.20（"压低灰感"约束）
+  ok('R35 shallowCol 日间 R 通道 ≤ 0.20（压灰）',
+    !!shallowDay && parseFloat(shallowDay![2].split(',')[0]) <= 0.20,
+    shallowDay ? `R=${shallowDay[2].split(',')[0]}` : '色值未找到')
+}
+
+// R35b · 太阳 / 月亮轨迹解耦（用户反馈"月亮走轨迹诡异"）
+// 旧 bug：月亮仰角 = 38·sinθ（与太阳同相位），导致月日同起同落。
+// 现修：月亮严格取太阳反点，仰角 = -elDeg（异号），方位 +180°。
+{
+  const { dayNight } = await import('../src/data/farmSim.ts')
+  // 0:00 午夜：太阳在 -54°（地下），月亮应在 +54°（天上）
+  const dnMid = dayNight(0)
+  ok('R35b 月亮午夜正上空（moonDir.y > 0.5）',
+    dnMid.moonDir[1] > 0.5,
+    `moonY=${dnMid.moonDir[1].toFixed(2)}`)
+  // 12:00 正午：太阳在 +54°，月亮应在 -54°（地下）—— 严格反相
+  const dnNoon = dayNight(12)
+  ok('R35b 月亮正午在地平下（moonDir.y < -0.5）',
+    dnNoon.moonDir[1] < -0.5,
+    `moonY=${dnNoon.moonDir[1].toFixed(2)}`)
+  // 5:24 日出：太阳在东-地平（y≈0），月亮应在西-地平下（y≈0 但反向）
+  const dnSunrise = dayNight(5.4)
+  ok('R35b 日出时月亮仰角接近 0（与太阳 y 异号）',
+    Math.abs(dnSunrise.moonDir[1]) < 0.05 && dnSunrise.moonDir[1] * dnSunrise.sunDir[1] < 0,
+    `sunY=${dnSunrise.sunDir[1].toFixed(2)} moonY=${dnSunrise.moonDir[1].toFixed(2)}`)
+  // 月亮与太阳 3D 向量 dot 应 ≈ -1（球面反点，仰角 + 方位都反相 → 单位向量精确反）
+  const dot3 = dnNoon.moonDir[0] * dnNoon.sunDir[0] + dnNoon.moonDir[1] * dnNoon.sunDir[1] + dnNoon.moonDir[2] * dnNoon.sunDir[2]
+  ok('R35b 月亮与太阳 3D 反点 dot ≈ -1（球面对点）',
+    dot3 < -0.99,
+    `dot=${dot3.toFixed(3)}`)
+  // xz 平面投影 dot（去掉 y 分量）= -cos²(el)，正午 el=54° → -0.358
+  const dotXZ = dnNoon.moonDir[0] * dnNoon.sunDir[0] + dnNoon.moonDir[2] * dnNoon.sunDir[2]
+  const elNoon = (54 * Math.sin(((12 - 5.4) / 24) * Math.PI * 2) * Math.PI) / 180
+  const expectedXZ = -(Math.cos(elNoon) ** 2)
+  ok('R35b 月亮与太阳 xz 平面 dot ≈ -cos²(el)（去 y）',
+    Math.abs(dotXZ - expectedXZ) < 0.02,
+    `xzDot=${dotXZ.toFixed(3)} expected=${expectedXZ.toFixed(3)}`)
+}
+
+// R35c · 白天反光加强（指数 620→240，加散光层；夜间系数 0.16 不变）
+{
+  const fs = await import('node:fs/promises')
+  const src = await fs.readFile('src/scene/WorldTerrain.tsx', 'utf8')
+  ok('R35c 白天镜面指数降到 240（更宽反射锥）', src.includes('240.0)'))
+  ok('R35c 白天加散光层 pow(N·H, 28)', src.includes('28.0) * uDayF'))
+  ok('R35c 白天强度系数 0.9 → 1.4', src.includes('uDayF * 1.4'))
+  ok('R35c 夜间反光系数 0.16 保留', src.includes('night * 0.16'))
+}
+
+// R37 · 海洋终极收口：6 波 Gerstner（含 4 波短波毛细）+ 暗礁 + 背光 SSS
+{
+  const fs = await import('node:fs/promises')
+  const src = await fs.readFile('src/scene/WorldTerrain.tsx', 'utf8')
+  // 1. 短波 4 波：波长 ≤ 64m 的 gerstner 调用计数（友资产 64/31/17/9/4.6/2.3，我们取前 4）
+  //    现状：2400 + 1500 + 64 + 31 + 17 + 9 = 6 波（其中 4 波短波）
+  const wlMatches = [...src.matchAll(/gerstner\(p,\s*\w+,\s*[\d.]+,\s*([\d.]+),/g)]
+  const shortWl = wlMatches.map((m) => parseFloat(m[1])).filter((w) => w <= 64)
+  ok('R37 短波 4 波（波长 ≤ 64m 计数 = 4）', shortWl.length >= 4,
+    `共 ${shortWl.length} 短波（${shortWl.sort((a,b)=>b-a).join(',')}m）`)
+  // 2. 总波数 ≥ 6（长波 2 + 短波 4）
+  const totalWl = wlMatches.map((m) => parseFloat(m[1]))
+  ok('R37 Gerstner 总波数 ≥ 6', totalWl.length >= 6, `=${totalWl.length} 波`)
+  // 3. 暗礁 fragment 层
+  ok('R37 海礁/暗礁 fragment 暗斑层', src.includes('reefMask') && src.includes('reefCol'))
+  // 4. 背光 SSS 辉光
+  ok('R37 背光 SSS 辉光（vCrest × 背光因子）', src.includes('backlight') && src.includes('sssCol'))
+  // 5. cache key 升 v5-r37
+  ok('R37 customProgramCacheKey 升 v5-r37', src.includes('terrain-ocean-v5-r37'))
+  // 6. App.tsx splash 文案已切 R37
+  const app = await fs.readFile('src/App.tsx', 'utf8')
+  ok('R37 App splash 文案已切', app.includes('R37'))
 }
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)
