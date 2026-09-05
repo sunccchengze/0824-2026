@@ -4,14 +4,10 @@
 // 依赖：仅 Node 22 原生类型剥离；无浏览器、无网络。
 // ================================================================
 import {
-  farmFrame, optimizeYaw, windAt, FARM_RATED_MW, dayNight,
+  farmFrame, optimizeYaw, windAt, FARM_RATED_MW,
 } from '../src/data/farmSim.ts'
 import { powerCurveKw, yawFactor, wakeDeficit, TILT_F, wakeDeflection } from '../src/data/turbinePhysics.ts'
-import {
-  FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY,
-  landMask, biomeWeights, SNOW_LINE, grassSampleHits,
-  PEAKS, FJORD_A, FJORD_B, STACKS, HEADLANDS, bakeHeightGrid,
-} from '../src/scene/terrainUtil.ts'
+import { FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY } from '../src/scene/terrainUtil.ts'
 
 let pass = 0
 let fail = 0
@@ -231,11 +227,10 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
     if (sy > 12) seaOK = false // 风机区是海床，应接近海平面
   }
   // 第 31 轮「开放外海」：北(-z)/西(-x) 两相邻侧为陆地，南(+z)/东(+x) 两相邻侧开放为海。
-  // round6 起过渡带放宽至 1400m（缓坡入海），探针相应外移至 3000m（仍应 ≥30m）——
-  // 旧 2300m 探针锁的是“一堵墙”，与用户要的缓坡直接冲突，故外移而非降低阈值。
+  // 陆地侧在离场心约 2300m 处应已明显高于海面（≥30m）。
   for (const dir of [[0, -1] as const, [-1, 0] as const]) {
     const [dx, dz] = dir
-    const h = terrainHeight(FARM_CENTER.x + dx * 3000, FARM_CENTER.z + dz * 3000)
+    const h = terrainHeight(FARM_CENTER.x + dx * 2300, FARM_CENTER.z + dz * 2300)
     if (h < 30) coastOK = false
   }
   // 开放侧：南(+z)/东(+x) 在离场心 2300m 处应仍为海床（≤12m，无陆地抬升）
@@ -254,130 +249,6 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
   let waveOK = true
   for (const u of FARM) if (Math.abs(terrainSurfaceY(u.x, u.z) - terrainHeight(u.x, u.z)) > 1e-9) waveOK = false
   ok('V&V 波浪位移不污染贴地基准（静态几何=terrainSurfaceY）', waveOK, '机位贴地基准与地形同源')
-}
-
-// 16. 第 32 轮 A：真实海岸线/地貌（分形海岸 + 六群系 + 岛岬 + 草地核心）
-// ---------------------------------------------------------------
-// A1 海岸数值：机组/升压站零沾陆、600m 环零沾陆、开放侧纯海、升压站压平
-{
-  let mxUnit = 0
-  for (const u of [...FARM, SUBSTATION]) mxUnit = Math.max(mxUnit, landMask(u.x, u.z))
-  ok('R32-A1 机组/升压站零沾陆：landMask ≡ 0', mxUnit === 0, `max=${mxUnit}`)
-
-  // 600m 环采 16 点/机：过渡踪（>0.02）都不许进环
-  let ringBad = 0
-  for (const u of [...FARM, SUBSTATION]) {
-    for (let a = 0; a < 16; a++) {
-      const px = u.x + 600 * Math.cos((a / 16) * 2 * Math.PI)
-      const pz = u.z + 600 * Math.sin((a / 16) * 2 * Math.PI)
-      if (landMask(px, pz) > 0.02) ringBad++
-    }
-  }
-  ok('R32-A1 600m 机组净距：环上 160 点零沾陆（>0.02 即 fail）', ringBad === 0, `沾陆点=${ringBad}`)
-
-  // 开放侧（南/东 2300m 探针）：纯海、无岛 mask、无抬升
-  let openPure = true
-  for (const dir of [[0, 1] as const, [1, 0] as const]) {
-    const [dx, dz] = dir
-    const x = FARM_CENTER.x + dx * 2300
-    const z = FARM_CENTER.z + dz * 2300
-    if (landMask(x, z) !== 0 || terrainHeight(x, z) > 12) openPure = false
-  }
-  ok('R32-A1 开放外海纯净：南/东探针 landMask=0 且高度≤12m', openPure, '两相邻侧开放为海')
-
-  ok('R32-A1 升压站局地压平：站体高度 ≤3m', terrainHeight(SUBSTATION.x, SUBSTATION.z) <= 3,
-    `=${terrainHeight(SUBSTATION.x, SUBSTATION.z).toFixed(2)}m`)
-}
-
-// A2 生物群系：海面全零、权重归一、中带草原+林地主导
-{
-  const sea = biomeWeights(FARM_CENTER.x, FARM_CENTER.z)
-  const seaZero = sea.sand === 0 && sea.tidal === 0 && sea.grass === 0
-    && sea.forest === 0 && sea.hill === 0 && sea.mountain === 0
-  ok('R32-A2 海面群系全零（场心 land=0 处）', seaZero, JSON.stringify(sea))
-
-  // 中带点：x=-100 列自适应找 L∈[0.4,0.7]（ramp 宽度会变，固定坐标不可靠）
-  let midZ = 0
-  for (let z = -2000; z >= -4600; z -= 50) {
-    const L = landMask(-100, z)
-    if (L >= 0.4 && L <= 0.7) { midZ = z; break }
-  }
-  const w = biomeWeights(-100, midZ)
-  const L = landMask(-100, midZ)
-  const sum = w.sand + w.tidal + w.grass + w.forest + w.hill + w.mountain
-  ok('R32-A2 中带草原+林地主导（L∈[0.4,0.7] 处）',
-    midZ !== 0 && w.grass + w.forest > 0.6, `z=${midZ} L=${L.toFixed(3)} grass=${w.grass.toFixed(2)} forest=${w.forest.toFixed(2)}`)
-  ok('R32-A2 权重归一（和=1）', close(sum, 1, 1e-9), `sum=${sum}`)
-}
-
-// A3 雪线：SNOW_LINE=205；远山有雪载体（>205）、草原带无雪（<205）
-{
-  ok('R32-A3 雪线 SNOW_LINE = 380（CPU/GPU 同值，round10 上调）', SNOW_LINE === 380, `=${SNOW_LINE}`)
-  // round7 起高地振幅分区高矮，固定深陆点未必高于雪线 —— 改扫北陆块存在性
-  // （主峰 1200m 级恒在，雪冠载体不可能消失；断言存在性而非定点高度）
-  let highFound = false
-  for (let x = -4600; x <= -100 && !highFound; x += 200) {
-    for (let z = -4600; z <= -2100; z += 200) {
-      if (landMask(x, z) > 0.9 && terrainHeight(x, z) > SNOW_LINE) { highFound = true; break }
-    }
-  }
-  ok('R32-A3 高地高于雪线（雪冠有载体）', highFound, '北陆块扫描')
-  const midH = terrainHeight(-100, -2600) // 草原中带
-  ok('R32-A3 草原带低于雪线（雪不污染草原）', midH < SNOW_LINE, `=${midH.toFixed(1)}m`)
-}
-
-// A5 复杂地貌奇观（round3）：主峰高度、峡湾通道为海、海岬连陆、海蚀柱孤立
-{
-  const peakH = terrainHeight(PEAKS[0].x, PEAKS[0].z)
-  ok('R32-A5 主峰直插云霄（>600m，12倍轮毂高的量级）', peakH > 600, `=${peakH.toFixed(0)}m`)
-  const midX = (FJORD_A.x + FJORD_B.x) / 2
-  const midZ = (FJORD_A.z + FJORD_B.z) / 2
-  ok('R32-A5 峡湾通道为海（中线 landMask=0）', landMask(midX, midZ) === 0,
-    `L=${landMask(midX, midZ)} h=${terrainHeight(midX, midZ).toFixed(1)}m`)
-  const hd = HEADLANDS[0]
-  ok('R32-A5 海岬连陆（mask=1，为连岛岬非孤岛）', landMask(hd.x, hd.z) === 1,
-    `L=${landMask(hd.x, hd.z)}`)
-  // 每柱配一个向海见证点（柱体 mask≈1、高>10m，向海一侧 300m 外为海即孤立；
-  // 近岸柱的向陆一侧本就连浅滩，不在此约束）
-  const WIT: [number, number][] = [[-700, -1700], [-850, -1350], [2700, 400]]
-  let stacksOK = true
-  STACKS.forEach((st, i) => {
-    if (landMask(st.x, st.z) < 0.9) stacksOK = false
-    if (terrainHeight(st.x, st.z) < 10) stacksOK = false
-    if (landMask(WIT[i][0], WIT[i][1]) !== 0) stacksOK = false
-  })
-  ok('R32-A5 海蚀柱孤立（体 mask≈1、高>10m、向海见证点为海）', stacksOK, '三柱')
-}
-
-// A4 草地核心：2 万次试投，草原/林下命中 >1%（>200）
-{
-  const g = grassSampleHits(0)
-  const f = grassSampleHits(1)
-  ok('R32-A4 草原带可落位（拒绝采样命中>1%）', g > 200, `命中=${g}/20000`)
-  ok('R32-A4 林下可落位（拒绝采样命中>1%）', f > 200, `命中=${f}/20000`)
-}
-
-// C1 高度烘焙：网格索引↔坐标映射与真值逐点一致（GPU uv = xz/extent+0.5 的 CPU 侧锁）
-{
-  const g = bakeHeightGrid(16, 9200)
-  const pts: Array<[number, number]> = [[0, 0], [15, 15], [0, 15], [15, 0], [7, 9], [3, 12]]
-  let gridOK = g.size === 16 && g.extent === 9200 && g.data.length === 256
-  for (const [i, j] of pts) {
-    const x = (i / 15 - 0.5) * 9200, z = (j / 15 - 0.5) * 9200
-    if (Math.abs(g.data[j * 16 + i] - terrainSurfaceY(x, z)) > 0.01) gridOK = false // Float32 存取容差
-  }
-  ok('R32-C1 高度烘焙映射一致（索引↔坐标↔真值）', gridOK, '16²抽6点')
-}
-
-// C3 月夜约定：午夜月在天上（仰角>30°）、正午月在地平线下、月相门控对位
-{
-  const mid = dayNight(0)
-  const noon = dayNight(12)
-  const moonOK = mid.moonDir[1] > 0.5 && mid.moonF === 1
-    && noon.moonDir[1] < 0.2 && noon.moonF === 0
-    && noon.dayF === 1 && mid.dayF === 0
-  ok('R32-C3 月夜约定（午夜月高悬/正午月隐/门控对位）', moonOK,
-    `午夜月高=${mid.moonDir[1].toFixed(2)} 正午月高=${noon.moonDir[1].toFixed(2)}`)
 }
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)

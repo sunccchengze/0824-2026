@@ -2,13 +2,13 @@
 import { useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { terrainSurfaceY, landMask, coastT, FARM_CENTER, bakeHeightGrid } from './terrainUtil'
+import { terrainSurfaceY, landMask, FARM_CENTER } from './terrainUtil'
 import { skyState } from './lightState'
 import { windAt } from '../data/farmSim'
 import { useSim } from '../state/simStore'
 
 // ============================================================
-// 海洋地面（第 32 轮 A 重构 v4：六类生物群系 + 岩雪山体 + 海面克制化）
+// 海洋地面（第 29/30 轮重构：用户验收回访）
 // ------------------------------------------------------------
 // 诉求校正：
 //   · 海陆交界要精细、陆地明显高于海 → 海盆半径扩大，海岸带陡升（terrainUtil）；
@@ -27,10 +27,7 @@ varying float vWater;
 varying vec3 vWPos;
 varying vec3 vWN;
 varying float vLand;
-varying float vH;
-varying float vCoast;
 attribute float aLand;
-attribute float aCoast;
 uniform float uTime;
 uniform vec2 uWind;
 uniform vec2 uCenter;
@@ -67,8 +64,6 @@ void main() {
   float water = 1.0 - smoothstep(0.0, 0.02, aLand);
   vWater = water;
   vLand = aLand;
-  vH = baseY;
-  vCoast = aCoast;
 
   // 近场收敛：离场心越近波浪越收敛（塔基贴地、风场稳定）
   float d = length(wp.xz - uCenter);
@@ -91,10 +86,9 @@ void main() {
   vec3 newPos = vec3(wp.x, baseY + disp.y * lift, wp.z);
   newPos.xz += disp.xz * lift * 0.75;
 
-  // 法线：海水用大尺度 Gerstner 法线；陆地用真实几何法线（computeVertexNormals），
-  // 山体明暗/雪沟/裸岩全靠它 —— 此前陆地近似上向是“盐堆”感的根因（round4 修复）
+  // 法线：混合大尺度 Gerstner 法线与上向法线；陆地用原始（近似上向）
   vec3 gNorm = normalize(cross(binormal, tangent));
-  vec3 n = normalize(mix(normal, gNorm, water));
+  vec3 n = normalize(mix(vec3(0.0, 1.0, 0.0), gNorm, water));
   vWN = n;
 
   gl_Position = projectionMatrix * modelViewMatrix * vec4(newPos, 1.0);
@@ -107,17 +101,12 @@ varying float vWater;
 varying vec3 vWPos;
 varying vec3 vWN;
 varying float vLand;
-varying float vH;
-varying float vCoast;
 uniform float uTime;
 uniform float uDayF;
 uniform float uGlow;
 uniform vec3 uSunDir;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
-uniform vec2 uWind; // Step B：泡沫顺风拉丝用风向（uniforms 本就有，FRAG 补声明）
-uniform sampler2D uHeightTex; // Step C1：烘焙高度图（512²，uv = xz/9200+0.5）
-uniform vec3 uMoonDir; // Step C3：月光方向（地形月夜漫反射 + 水面月路）
 
 float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
 float vnoise(vec2 p){
@@ -162,25 +151,6 @@ vec3 waterNormal(vec2 p) {
   return normalize(n);
 }
 
-// —— 地形投影（Step C1）：沿太阳方向 march 高度图 ——
-// 10 步、近密远疏（40m→~3000m），软半影；返回 1=全亮、0=全影。
-// 调用方以 shadowAmt 按太阳高度连续渐隐；域外视为无遮挡。
-float terrainShadow(vec3 p, vec3 sunDir) {
-  float res = 1.0;
-  float t = 40.0;
-  for (int i = 0; i < 10; i++) {
-    vec3 tp = p + sunDir * t;
-    vec2 suv = tp.xz / 9200.0 + 0.5;
-    if (suv.x > 0.001 && suv.x < 0.999 && suv.y > 0.001 && suv.y < 0.999) {
-      float th = texture2D(uHeightTex, suv).r;
-      res = min(res, 8.0 * (tp.y - th + 1.5) / t);
-    }
-    t *= 1.55;
-  }
-  float sh = clamp(res, 0.0, 1.0);
-  return sh * sh * (3.0 - 2.0 * sh);
-}
-
 void main() {
   float night = 1.0 - uDayF;
   vec3 V = normalize(cameraPosition - vWPos);
@@ -194,10 +164,6 @@ void main() {
   // 浪尖层次：片元内用解析波高现算（摆脱顶点网格 → 消除条带/格子感）
   float wh = waveHeight(vWPos.xz);
   float crest = smoothstep(0.25, 0.85, wh); // 归一化波高 → 0..1 浪尖
-  // Step B1：打散浪尖云斑 —— 高频 breakup 把正弦干涉的 200m+ 亮斑撕碎，
-  // 提亮不同步下调（0.55→0.42），海面不再“长癣”
-  float breakup = fbm(vWPos.xz * 0.020 + vec2(uTime * 0.05, -uTime * 0.03));
-  crest *= 0.45 + 0.55 * smoothstep(0.25, 0.75, breakup);
 
   // —— Fresnel 菲涅尔：贴水面反射天空；用「面朝上」gate 掉陡岸坡发白 ——
   float upness = smoothstep(0.36, 0.72, N.y);
@@ -207,11 +173,11 @@ void main() {
   // 参照用户原图：海底深青黑，浪尖点缀青白，整体暗、不刺眼。
   vec3 deepCol  = mix(vec3(0.008, 0.022, 0.038), vec3(0.050, 0.115, 0.185), uDayF); // 浪谷（深青黑）
   vec3 shallowCol = mix(vec3(0.024, 0.055, 0.082), vec3(0.150, 0.310, 0.420), uDayF); // 浪尖（低饱和青蓝）
-  vec3 waterCol = mix(deepCol, shallowCol, crest * 0.42);
+  vec3 waterCol = mix(deepCol, shallowCol, crest * 0.66);
 
   // 天空反射：低饱和灰青蓝（白天）→ 近黑（夜），权重压低避免整片洗灰
   vec3 skyRef = mix(vec3(0.014, 0.032, 0.054), vec3(0.150, 0.290, 0.385), uDayF);
-  waterCol = mix(waterCol, skyRef, clamp(fres, 0.0, 1.0) * (0.045 + 0.07 * uDayF));
+  waterCol = mix(waterCol, skyRef, clamp(fres, 0.0, 1.0) * (0.055 + 0.085 * uDayF));
 
   // —— 太阳/月亮镜面高光：细碎点状波光（点状，克制，不高亮成云斑）——
   vec3 halfV = normalize(V + uSunDir);
@@ -219,176 +185,45 @@ void main() {
   float sparkle = fbm(vWPos.xz * 0.12 + uTime * 0.8) * fbm(vWPos.xz * 0.35 - uTime * 0.5);
   spec *= (0.10 + 0.90 * sparkle);
   vec3 sunCol = mix(vec3(0.11, 0.26, 0.38), vec3(0.80, 0.80, 0.78), uDayF);
-  waterCol += sunCol * spec * (uDayF * 0.72 + night * 0.13);
+  waterCol += sunCol * spec * (uDayF * 0.9 + night * 0.16);
 
-  // —— 波峰泡沫（Step B2）：顺风拉丝 + 米级碎点 + 三重稀疏门 ——
-  // 各向异性坐标把各向同性云斑拉成风纹碎浪，随风漂移；只在最碎的浪尖出现
-  vec2 wdirF = normalize(uWind + vec2(0.0001, 0.0));
-  vec2 wperpF = vec2(-wdirF.y, wdirF.x);
-  float alongW = dot(vWPos.xz, wdirF);
-  float acroW = dot(vWPos.xz, wperpF);
-  float foamStreak = fbm(vec2(alongW * 0.045 - uTime * 0.25, acroW * 0.20) + crest * 2.0);
-  float foamFleck = vnoise(vWPos.xz * 0.9 + uTime * 0.4); // 米级碎点
-  float foamMask = smoothstep(0.78, 0.97, crest)
-    * smoothstep(0.55, 0.85, foamStreak)
-    * (0.35 + 0.65 * smoothstep(0.55, 0.9, foamFleck));
+  // —— 波峰泡沫：只在 crest，且提频打散成细碎稀疏浪花（克制；避免大块云斑）——
+  float foamNoise = fbm(vWPos.xz * 0.075 + uTime * 0.06 + crest * 3.0);
+  float foamMask = smoothstep(0.66, 0.98, crest) * (0.10 + 0.60 * smoothstep(0.58, 0.86, foamNoise));
   vec3 foam = mix(vec3(0.028, 0.06, 0.09), vec3(0.50, 0.63, 0.68), uDayF); // 更低饱淡青白
-  waterCol = mix(waterCol, foam, foamMask * (0.03 + uDayF * 0.09));
-  // —— 水侧水线（Step B3）：紧贴岸线的海侧碎浪，与陆侧 foamDot 合成完整水线 ——
-  // 水像素中 vLand∈(0,0.02) 即岸线外 15~40m；环岸/环岛/环柱自动出现，机组区 vLand=0 不受影响
-  float surfBand = smoothstep(0.0, 0.004, vLand) * (1.0 - smoothstep(0.004, 0.02, vLand));
-  float surfN = 0.35 + 0.65 * fbm(vWPos.xz * 0.30 + vec2(-uTime * 0.35, uTime * 0.2));
-  waterCol = mix(waterCol, foam, surfBand * surfN * (0.10 + uDayF * 0.30) * vWater);
+  waterCol = mix(waterCol, foam, foamMask * (0.08 + uDayF * 0.18));
 
-  // —— 月路（C3）：明月在水面的镜面光路 + 月照涌动 ——
-  // 旧版用太阳方向算夜高光，夜里太阳在地平线下故恒≈0（“夜里没光”的另一半根因）
-  vec3 halfVM = normalize(V + normalize(uMoonDir));
-  float moonSpec = pow(max(dot(Ns, halfVM), 0.0), 220.0);
-  waterCol += vec3(0.38, 0.56, 0.70) * moonSpec * night * (0.25 + uGlow) * 1.1;
-  waterCol += vec3(0.05, 0.12, 0.18) * crest * night * (0.25 + uGlow) * 0.55;
+  // —— 夜间暗潮微光：极弱青蓝涌动 ——
+  float moonSpec = pow(max(dot(Ns, halfV), 0.0), 220.0);
+  waterCol += vec3(0.05, 0.13, 0.20) * moonSpec * night * uGlow * 0.30;
+  waterCol += vec3(0.02, 0.06, 0.11) * crest * night * uGlow * 0.40;
 
-  // —— 陆地 v4（六类生物群系 + 岩雪山体，第 32 轮 A）——
-  // 与 CPU 端 biomeWeights() 同式；L = vLand（0 海 → 1 内陆）。
-  float L = vLand;
-  // 岸线破碎（round5）：渲染级高频扰动，沙/潮带按扰动后的 Lp 落位，水线参差 ——
-  // CPU 端 biomeWeights 仍用平滑 L（草地散布不需要 40m 级参差），此处分歧是渲染级细节。
-  float shoreN = fbm(vWPos.xz * 0.025 + 11.3);
-  float Lp = L + (shoreN - 0.5) * 0.16;
-  float wSand   = 1.0 - smoothstep(0.06, 0.16, Lp);
-  float wTidal  = smoothstep(0.05, 0.12, Lp) * (1.0 - smoothstep(0.16, 0.28, Lp));
-  float wGrass  = smoothstep(0.14, 0.30, L) * (1.0 - smoothstep(0.45, 0.62, L));
-  float wForest = smoothstep(0.38, 0.55, L) * (1.0 - smoothstep(0.68, 0.82, L));
-  float wHill   = smoothstep(0.60, 0.75, L) * (1.0 - smoothstep(0.85, 0.95, L));
-  float wMtn    = smoothstep(0.82, 0.93, L);
-  float wSandE = pow(wSand, 1.25); float wTidalE = pow(wTidal, 1.25); float wGrassE = pow(wGrass, 1.25);
-  float wForestE = pow(wForest, 1.25); float wHillE = pow(wHill, 1.25); float wMtnE = pow(wMtn, 1.25);
-  float wSum = wSandE + wTidalE + wGrassE + wForestE + wHillE + wMtnE + 1e-5;
-  wSand = wSandE / wSum; wTidal = wTidalE / wSum; wGrass = wGrassE / wSum;
-  wForest = wForestE / wSum; wHill = wHillE / wSum; wMtn = wMtnE / wSum;
+  // —— 陆地（分带生物群系：近岸黄沙 → 内陆森林 → 远山），与海面形成强对比 ——
+  // 用 vLand（0..1，向陆地线性增大）作为「离海岸远近」的代理：
+  //   vLand ∈ (0, 0.16)：沙带；vLand ∈ (0.14, 0.62)：森林；vLand > 0.55：远山。
+  float sandMask  = 1.0 - smoothstep(0.06, 0.17, vLand);            // 近岸沙带(只在低land)
+  float forestMask = smoothstep(0.12, 0.26, vLand) * (1.0 - smoothstep(0.60, 0.80, vLand));
+  float mtnMask   = smoothstep(0.55, 0.85, vLand);                 // 内陆远山
 
-  // 日间群系色（A-round2：拉开色相/明度距离，分层可辨；仍压住饱和，克制不刺眼）
-  vec3 cSand   = vec3(0.450, 0.360, 0.240); // 干沙（暖亮）
-  vec3 cTidal  = vec3(0.160, 0.130, 0.090); // 潮间湿沙（深，湿润感）
-  vec3 cGrass  = vec3(0.135, 0.235, 0.095); // 草原（压暗，远观不晃眼）
-  vec3 cForest = vec3(0.070, 0.160, 0.100); // 林地（深绿）
-  vec3 cHill   = vec3(0.230, 0.200, 0.130); // 缓丘（棕橄榄，与林地区分）
-  vec3 cRock   = vec3(0.110, 0.120, 0.140); // 山岩（深灰）
-
-  // 细节噪声：草原/林地高频斑驳、沙粒微粒、山岩分形
-  float g1 = vnoise(vWPos.xz * 0.020);
-  float g2 = vnoise(vWPos.xz * 0.055 + 7.3);
-  float grassN = g1 * 0.65 + g2 * 0.35;
-  float sandN = vnoise(vWPos.xz * 0.11 + 3.1);
-  float rockN = fbm(vWPos.xz * 0.008 + 1.7);
-  float ribs = fbm(vec2(vWPos.x * 0.020 + vWPos.z * 0.013, vWPos.z * 0.031 - vWPos.x * 0.007)); // 沟脊（雪沟/岩脊/AO共用）
-  float crownN = g1 * 0.5 + fbm(vWPos.xz * 0.030) * 0.5;
-
-  vec3 landDay = cSand * (0.92 + 0.16 * sandN) * wSand
-               + cTidal * wTidal
-               + cGrass * (0.78 + 0.44 * grassN) * wGrass
-               + cForest * (0.78 + 0.44 * crownN) * wForest
-               + cHill * (0.85 + 0.30 * rockN) * wHill
-               + cRock * (0.80 + 0.40 * rockN) * wMtn;
-  // 陆地起伏漫反射（只作用陆地；雪有自己的日光模型，不在此重复压暗）
-  float landDiff = 0.70 + 0.30 * clamp(dot(N, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
-  landDay *= mix(1.0, landDiff, 1.0 - vWater);
-  // 湿沙带：紧贴水线压暗（退潮湿润感），只作用沙/潮带 —— 岸线“镶边”，破画笔渐变
-  float wetBand = (1.0 - smoothstep(0.015, 0.10, Lp)) * clamp(wSand + wTidal, 0.0, 1.0);
-  landDay *= 1.0 - wetBand * 0.45;
-
-  // —— 细节法线（round4）：高频起伏扰动，只用于雪/岩光照，制造嶙峋光影 ——
-  float eD = 6.0;
-  float dHx = fbm(vWPos.xz * 0.045 + 3.7) - fbm(vWPos.xz * 0.045 - vec2(eD * 0.045, 0.0) + 3.7);
-  float dHz = fbm(vWPos.xz * 0.045 + 3.7) - fbm(vWPos.xz * 0.045 - vec2(0.0, eD * 0.045) + 3.7);
-  vec3 Ndet = normalize(N + vec3(-dHx * 2.2, 0.0, -dHz * 2.2));
-  // 微起伏（round8）：米级地表凹凸进法线，近看有“颗粒”，远处衰减防闪烁
-  float camDist = length(cameraPosition - vWPos);
-  float microFade = exp(-camDist / 380.0);
-  if (microFade > 0.01) {
-    float m1 = fbm(vWPos.xz * 0.55 + 7.1);
-    float m2 = fbm(vWPos.xz * 0.55 + vec2(2.5, 0.0) + 7.1);
-    float m3 = fbm(vWPos.xz * 0.55 + vec2(0.0, 2.5) + 7.1);
-    Ndet = normalize(Ndet + vec3((m1 - m2) * 1.6, 0.0, (m1 - m3) * 1.6) * microFade);
-  }
-  float fade2 = exp(-camDist / 500.0); // 反照率微细节衰减（比法线稍远）
-
-  // 山脊裸岩：坡陡处露出山岩（细节法线让岩壁有明暗皴擦，谷地留绿）
-  float steep = 1.0 - Ndet.y;
-  float rockExp = smoothstep(0.42, 0.72, steep) * clamp(wHill + wMtn, 0.0, 1.0);
-  landDay = mix(landDay, cRock * (0.85 + 0.30 * rockN), clamp(rockExp, 0.0, 1.0) * 0.85);
-
-  // —— 雪冠 v2（round4）：岩脊雪沟 + 日光质感，告别“盐堆” ——
-  // 沟留雪、脊露岩：高频脊线 + 雪线扰动打破“一刀切”（雪线 380/460，与 CPU SNOW_LINE 同值）
-  float snow = smoothstep(380.0, 460.0, vH + (ribs - 0.5) * 90.0);
-  float slopeGate = smoothstep(0.35, 0.70, Ndet.y); // 陡壁挂不住雪（窄脊主峰正需要）
-  float ribGate = 0.50 + 0.50 * smoothstep(0.30, 0.70, ribs); // 沟雪脊岩
-  snow *= (0.25 + 0.75 * slopeGate) * ribGate;
-  snow *= 0.35 + 0.65 * wMtn;
-  float snowM = clamp(snow, 0.0, 1.0);
-  // 雪的日光：向阳暖白 / 背阴冷蓝（整块平板白的根因在此）
-  float sunDiff = clamp(dot(Ndet, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
-  vec3 snowCol = mix(vec3(0.42, 0.50, 0.66), vec3(1.02, 1.00, 0.97), sunDiff);
-  // 风蚀纹（sastrugi）：拉伸条纹明暗，近看有“风雕”质感
-  float sast = fbm(vec2((vWPos.x + vWPos.z) * 0.06, (vWPos.x - vWPos.z) * 0.012));
-  snowCol *= 0.88 + 0.24 * sast;
-  // 雪晶闪光：只在向阳面星星点点（白天反光强度的来源，克制）
-  vec3 Vv = normalize(cameraPosition - vWPos);
-  vec3 Hv = normalize(Vv + uSunDir);
-  float glint = pow(max(dot(Ndet, Hv), 0.0), 60.0);
-  float glintN = fbm(vWPos.xz * 0.12 + uTime * 0.05);
-  snowCol += vec3(1.0, 0.98, 0.94) * glint * smoothstep(0.50, 0.9, glintN) * uDayF * 4.0 * sunDiff;
-  landDay = mix(landDay, snowCol, snowM);
-  // 岩石质感（round5）：层理 + 碎石颗粒 + 凹缝 AO，杀“塑料黏土”；
-  // round10 起只给高山 + 陡壁（丘陵带保持干净植被，不再整片压灰）
-  float strata = sin(vH * 0.33 + rockN * 5.0 + Ndet.x * 2.0);
-  float rockGrain = vnoise(vWPos.xz * 0.06) * 0.6 + vnoise(vWPos.xz * 0.17 + 4.2) * 0.4;
-  float crevAO = 0.70 + 0.30 * smoothstep(0.25, 0.75, ribs * 0.5 + rockGrain * 0.5);
-  float rockZone = clamp(wMtn + rockExp, 0.0, 1.0);
-  float rockTex = (0.88 + 0.12 * strata) * (0.78 + 0.44 * rockGrain) * crevAO;
-  landDay *= mix(1.0, rockTex, (1.0 - snowM) * clamp(rockZone, 0.0, 1.0));
-  // 微反照率（round8）：厘米~米级地表质感，放大看的本钱；植被（草/树）不管，只做地
-  if (fade2 > 0.02) {
-    // 沙：风成波纹（定向）+ 散布卵石
-    float ripple = sin(dot(vWPos.xz, vec2(0.9, 0.45)) * 2.2 + fbm(vWPos.xz * 0.15) * 9.0);
-    float pebble = step(0.965, hash21(floor(vWPos.xz * 2.6) + 1.0));
-    float sandZone = clamp(wSand + wTidal, 0.0, 1.0);
-    landDay *= 1.0 + (ripple * 0.10 + (fbm(vWPos.xz * 2.3) - 0.5) * 0.25) * sandZone * fade2;
-    landDay *= 1.0 - pebble * 0.35 * sandZone * fade2;
-    // 草地：丛块浓淡（不是草叶，是地被斑驳；种草另起）
-    float tuft = fbm(vWPos.xz * 0.9 + 2.2);
-    landDay *= 1.0 + (tuft - 0.5) * 0.35 * clamp(wGrass + wForest * 0.5, 0.0, 1.0) * fade2;
-    // 岩：裂隙网（深色脉）+ 碎石灰点
-    float crack = 1.0 - abs(2.0 * fbm(vWPos.xz * 0.33 + 5.5) - 1.0);
-    crack = pow(crack, 3.0);
-    float scree = step(0.975, hash21(floor(vWPos.xz * 3.1) + 7.0));
-    float bareRock = clamp(rockZone, 0.0, 1.0) * (1.0 - snowM);
-    landDay *= 1.0 - crack * 0.40 * bareRock * fade2;
-    landDay *= 1.0 + scree * 0.30 * bareRock * fade2;
-    // 水线：泡沫碎点（陆侧水线镶边，水体泡沫归 Step B）
-    float foamDot = step(0.93, hash21(floor(vWPos.xz * 1.4) + 3.0)) * (1.0 - smoothstep(0.005, 0.05, Lp));
-    landDay = mix(landDay, vec3(0.75, 0.82, 0.84), foamDot * 0.7 * fade2);
-  }
+  // 沙：低饱和暖黄（克制、不刺眼的黄褐），白天亮、夜里压暗
+  vec3 sandCol = mix(vec3(0.075, 0.058, 0.036), vec3(0.40, 0.34, 0.20), uDayF);
+  // 森林：低饱和冷绿（莫兰迪），白天呈现灰绿林地
+  vec3 forestCol = mix(vec3(0.035, 0.055, 0.044), vec3(0.12, 0.24, 0.15), uDayF);
+  // 远山：深灰青（大气剪影感，接原有冷调）
+  vec3 mtnCol = vec3(0.014, 0.030, 0.050) + vec3(0.012, 0.032, 0.055) * uDayF * 0.9;
 
   float lm = vnoise(vWPos.xz * 0.0021);
   lm += 0.5 * vnoise(vWPos.xz * 0.0055);
+  // 森林纹理：细碎树冠斑驳（高频）、低饱和
+  float forestN = vnoise(vWPos.xz * 0.012);
+  forestN += 0.5 * vnoise(vWPos.xz * 0.030);
 
-  // 昼夜：夜间统一压暗（保留冷调），白天补微弱冷光
-  vec3 landCol = landDay * mix(vec3(0.19, 0.20, 0.23), vec3(1.0), uDayF);
-  // —— 月夜漫反射（C3）：月光给山体塑形，背阳面留天光底不死黑（包裹漫反射）——
-  float moonDiff = clamp(dot(N, normalize(uMoonDir)) * 0.5 + 0.5, 0.0, 1.0);
-  landCol += vec3(0.30, 0.42, 0.58) * moonDiff * night * 0.35;
-  landCol += (lm - 0.5) * 0.04;                        // 微弱整体斑驳
+  vec3 landCol = mtnCol;
+  // 森林在台地，沙在近岸，两者在各自带内叠加
+  landCol = mix(landCol, forestCol * (0.82 + 0.28 * forestN), forestMask * 0.9);
+  landCol = mix(landCol, sandCol * (0.9 + 0.2 * vnoise(vWPos.xz * 0.02)), sandMask * 0.9);
+  landCol += (lm - 0.5) * 0.04;                    // 微弱整体斑驳
   landCol += vec3(0.012, 0.040, 0.060) * uDayF * 0.45; // 白天冷调补光
-
-  // —— 投影落位（Step C1/C2）：只作用陆地；影里留 30% 天光 + 透冷调 ——
-  // C2：①加重（0.38→0.30）；②随太阳高度渐显渐隐 —— 日出日落阴影淡入淡出。
-  // 硬门限（uSunDir.y>0.02）是昼夜交替“啪”地开关的根因，改连续 fade。
-  float shadowAmt = smoothstep(-0.01, 0.10, uSunDir.y) * step(0.005, uDayF);
-  if (vWater < 0.5 && shadowAmt > 0.002) {
-    float sh = terrainShadow(vWPos, uSunDir);
-    landCol *= mix(1.0, mix(0.30, 1.0, sh), shadowAmt);
-    landCol += vec3(0.010, 0.025, 0.045) * (1.0 - sh) * uDayF * shadowAmt; // 阴影透天光冷调
-  }
 
   vec3 col = mix(landCol, waterCol, vWater);
 
@@ -405,33 +240,20 @@ void main() {
 export default function WorldTerrain() {
   const { geo, mat } = useMemo(() => {
     const SIZE = 9200
-    const SEG = 400 // round8：23m 单元（160k 顶点，启动多 ~2s，换近岸轮廓）
+    const SEG = 300
     const g = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG)
     g.rotateX(-Math.PI / 2)
     const pos = g.attributes.position as THREE.BufferAttribute
     const land = new Float32Array(pos.count)
-    const coast = new Float32Array(pos.count)
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i)
       const z = pos.getZ(i)
       const y = terrainSurfaceY(x, z)
       pos.setY(i, y)
       land[i] = landMask(x, z)
-      coast[i] = coastT(x, z)
     }
     g.setAttribute('aLand', new THREE.BufferAttribute(land, 1))
-    g.setAttribute('aCoast', new THREE.BufferAttribute(coast, 1))
     g.computeVertexNormals()
-
-    // Step C1 高度纹理：512² 烘焙（半浮点线性过滤；R16F WebGL2 可过滤，无需扩展）
-    const hg = bakeHeightGrid(512, SIZE)
-    const hdata = new Uint16Array(hg.size * hg.size)
-    for (let k = 0; k < hdata.length; k++) hdata[k] = THREE.DataUtils.toHalfFloat(hg.data[k])
-    const htex = new THREE.DataTexture(hdata, hg.size, hg.size, THREE.RedFormat, THREE.HalfFloatType)
-    htex.magFilter = THREE.LinearFilter
-    htex.minFilter = THREE.LinearFilter
-    htex.wrapS = htex.wrapT = THREE.ClampToEdgeWrapping
-    htex.needsUpdate = true
 
     const u = {
       uTime: { value: 0 },
@@ -441,9 +263,7 @@ export default function WorldTerrain() {
       uGlow: { value: 1 },
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uFogColor: { value: new THREE.Color('#040911') },
-      uFogDensity: { value: 0.00013 }, // C4：默认值随 App 场景雾（逐帧覆盖，此处仅首帧）
-      uHeightTex: { value: htex },
-      uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
+      uFogDensity: { value: 0.00022 },
     }
 
     const m = new THREE.ShaderMaterial({
@@ -455,7 +275,7 @@ export default function WorldTerrain() {
       depthWrite: true,
       fog: false,
     })
-    m.customProgramCacheKey = () => 'terrain-ocean-v4'
+    m.customProgramCacheKey = () => 'terrain-ocean-v3'
     ;(m.userData as any).u = u
     return { geo: g, mat: m }
   }, [])
@@ -467,7 +287,6 @@ export default function WorldTerrain() {
       uDayF: { value: number }
       uGlow: { value: number }
       uSunDir: { value: THREE.Vector3 }
-      uMoonDir: { value: THREE.Vector3 }
       uFogColor: { value: THREE.Color }
       uFogDensity: { value: number }
     }
@@ -480,7 +299,6 @@ export default function WorldTerrain() {
     uu.uGlow.value = dayF * 0.6 + night * nightGlow
     uu.uDayF.value = dayF
     uu.uSunDir.value.copy(skyState.sunDir)
-    uu.uMoonDir.value.copy(skyState.moonDir)
     const { fromDeg } = windAt(useSim.getState().tHours)
     const th = (fromDeg * Math.PI) / 180
     uu.uWind.value.set(Math.sin(th), Math.cos(th))

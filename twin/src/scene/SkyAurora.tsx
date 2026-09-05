@@ -22,7 +22,6 @@ varying vec3 vDir;
 uniform float uTime;
 uniform float uDay;
 uniform vec3 uSunDir;
-uniform vec3 uMoonDir;
 uniform sampler2D uSkyTex;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
@@ -115,20 +114,6 @@ void main() {
   col += vec3(0.92, 0.97, 1.0) * pow(sunDot, 1400.0) * 1.35 * uDay;
   col += vec3(0.32, 0.46, 0.58) * pow(sunDot, 14.0) * 0.16 * uDay;
 
-  // —— 明月（C3）：月轮 + 晕 + 远辉，随夜色渐显（night 门控，昼夜连续不断裂）——
-  vec3 md = normalize(uMoonDir);
-  float moonDot = clamp(dot(d, md), 0.0, 1.0);
-  float mDisc = smoothstep(0.99980, 0.99995, moonDot); // 月面（~0.6°）
-  float limb = 0.75 + 0.25 * smoothstep(0.99980, 1.0, moonDot); // 临边昏暗
-  vec3 moonWhite = vec3(0.92, 0.96, 1.0);
-  col += moonWhite * mDisc * limb * 2.4 * night; // 明盘
-  // 月海：两块暗斑（程序写意，不求精确环形山）
-  float maria = smoothstep(0.45, 0.9, fbm(d.xy * 900.0 + md.xy * 130.0));
-  col -= moonWhite * mDisc * maria * 0.35 * night;
-  col += vec3(0.55, 0.70, 0.85) * pow(moonDot, 900.0) * 0.9 * night; // 内晕
-  col += vec3(0.35, 0.52, 0.68) * pow(moonDot, 90.0) * 0.22 * night; // 外晕
-  col += vec3(0.20, 0.32, 0.44) * pow(moonDot, 9.0) * 0.10 * night; // 远辉（月出月落的地平气息）
-
   gl_FragColor = vec4(col, 1.0);
 }
 `
@@ -145,7 +130,6 @@ export default function SkyAurora() {
   const uniforms = useMemo(() => ({
     uTime: { value: 0 }, uDay: { value: 0 },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
-    uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
     uSkyTex: { value: skyTexture },
   }), [skyTexture])
 
@@ -155,7 +139,6 @@ export default function SkyAurora() {
     u.uTime.value = state.clock.elapsedTime
     u.uDay.value = skyState.dayF
     u.uSunDir.value.copy(skyState.sunDir)
-    u.uMoonDir.value.copy(skyState.moonDir)
   })
 
   return (
