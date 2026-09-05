@@ -429,7 +429,9 @@ export function dayNight(tHours: number): {
   const sy = Math.sin(el)
   const dayF = Math.min(1, Math.max(0, (elDeg + 4) / 16)) // 连续，触底 0
   // 月亮=日对点：方位 az+180、仰角 −38·sinθ（夜正昼负），日落/日出天然衔接
-  const elM = (38 * Math.sin(th) * Math.PI) / 180
+  // C3 修正：旧式 38·sinθ 在午夜为 −37°（月在地平线下）而正午 +38°（月高悬），
+  // 正负写反 —— 夜里 moonF=1 却只能从地平线爬出微光，正是“没有月亮”的根因
+  const elM = (-38 * Math.sin(th) * Math.PI) / 180
   const azM = az + Math.PI
   const moonF = Math.min(1, Math.max(0, (-elDeg + 3) / 18))
   return {

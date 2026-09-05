@@ -4,13 +4,13 @@
 // 依赖：仅 Node 22 原生类型剥离；无浏览器、无网络。
 // ================================================================
 import {
-  farmFrame, optimizeYaw, windAt, FARM_RATED_MW,
+  farmFrame, optimizeYaw, windAt, FARM_RATED_MW, dayNight,
 } from '../src/data/farmSim.ts'
 import { powerCurveKw, yawFactor, wakeDeficit, TILT_F, wakeDeflection } from '../src/data/turbinePhysics.ts'
 import {
   FARM, SUBSTATION, FARM_CENTER, terrainHeight, terrainSurfaceY,
   landMask, biomeWeights, SNOW_LINE, grassSampleHits,
-  PEAKS, FJORD_A, FJORD_B, STACKS, HEADLANDS,
+  PEAKS, FJORD_A, FJORD_B, STACKS, HEADLANDS, bakeHeightGrid,
 } from '../src/scene/terrainUtil.ts'
 
 let pass = 0
@@ -355,6 +355,29 @@ ok('偏航因子：cos^p 随 |yaw| 递减', yawFactor(0) > yawFactor(10) && yawF
   const f = grassSampleHits(1)
   ok('R32-A4 草原带可落位（拒绝采样命中>1%）', g > 200, `命中=${g}/20000`)
   ok('R32-A4 林下可落位（拒绝采样命中>1%）', f > 200, `命中=${f}/20000`)
+}
+
+// C1 高度烘焙：网格索引↔坐标映射与真值逐点一致（GPU uv = xz/extent+0.5 的 CPU 侧锁）
+{
+  const g = bakeHeightGrid(16, 9200)
+  const pts: Array<[number, number]> = [[0, 0], [15, 15], [0, 15], [15, 0], [7, 9], [3, 12]]
+  let gridOK = g.size === 16 && g.extent === 9200 && g.data.length === 256
+  for (const [i, j] of pts) {
+    const x = (i / 15 - 0.5) * 9200, z = (j / 15 - 0.5) * 9200
+    if (Math.abs(g.data[j * 16 + i] - terrainSurfaceY(x, z)) > 0.01) gridOK = false // Float32 存取容差
+  }
+  ok('R32-C1 高度烘焙映射一致（索引↔坐标↔真值）', gridOK, '16²抽6点')
+}
+
+// C3 月夜约定：午夜月在天上（仰角>30°）、正午月在地平线下、月相门控对位
+{
+  const mid = dayNight(0)
+  const noon = dayNight(12)
+  const moonOK = mid.moonDir[1] > 0.5 && mid.moonF === 1
+    && noon.moonDir[1] < 0.2 && noon.moonF === 0
+    && noon.dayF === 1 && mid.dayF === 0
+  ok('R32-C3 月夜约定（午夜月高悬/正午月隐/门控对位）', moonOK,
+    `午夜月高=${mid.moonDir[1].toFixed(2)} 正午月高=${noon.moonDir[1].toFixed(2)}`)
 }
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`)

@@ -2,7 +2,7 @@
 import { useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { terrainSurfaceY, landMask, coastT, FARM_CENTER } from './terrainUtil'
+import { terrainSurfaceY, landMask, coastT, FARM_CENTER, bakeHeightGrid } from './terrainUtil'
 import { skyState } from './lightState'
 import { windAt } from '../data/farmSim'
 import { useSim } from '../state/simStore'
@@ -116,6 +116,8 @@ uniform vec3 uSunDir;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
 uniform vec2 uWind; // Step B：泡沫顺风拉丝用风向（uniforms 本就有，FRAG 补声明）
+uniform sampler2D uHeightTex; // Step C1：烘焙高度图（512²，uv = xz/9200+0.5）
+uniform vec3 uMoonDir; // Step C3：月光方向（地形月夜漫反射 + 水面月路）
 
 float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
 float vnoise(vec2 p){
@@ -158,6 +160,25 @@ vec3 waterNormal(vec2 p) {
   float nB = fbm(p * 0.11 - uTime * 0.09);
   n += vec3((nA - 0.5) * 0.20, 0.0, (nB - 0.5) * 0.20);
   return normalize(n);
+}
+
+// —— 地形投影（Step C1）：沿太阳方向 march 高度图 ——
+// 10 步、近密远疏（40m→~3000m），软半影；返回 1=全亮、0=全影。
+// 调用方以 shadowAmt 按太阳高度连续渐隐；域外视为无遮挡。
+float terrainShadow(vec3 p, vec3 sunDir) {
+  float res = 1.0;
+  float t = 40.0;
+  for (int i = 0; i < 10; i++) {
+    vec3 tp = p + sunDir * t;
+    vec2 suv = tp.xz / 9200.0 + 0.5;
+    if (suv.x > 0.001 && suv.x < 0.999 && suv.y > 0.001 && suv.y < 0.999) {
+      float th = texture2D(uHeightTex, suv).r;
+      res = min(res, 8.0 * (tp.y - th + 1.5) / t);
+    }
+    t *= 1.55;
+  }
+  float sh = clamp(res, 0.0, 1.0);
+  return sh * sh * (3.0 - 2.0 * sh);
 }
 
 void main() {
@@ -219,10 +240,12 @@ void main() {
   float surfN = 0.35 + 0.65 * fbm(vWPos.xz * 0.30 + vec2(-uTime * 0.35, uTime * 0.2));
   waterCol = mix(waterCol, foam, surfBand * surfN * (0.10 + uDayF * 0.30) * vWater);
 
-  // —— 夜间暗潮微光：极弱青蓝涌动 ——
-  float moonSpec = pow(max(dot(Ns, halfV), 0.0), 220.0);
-  waterCol += vec3(0.05, 0.13, 0.20) * moonSpec * night * uGlow * 0.30;
-  waterCol += vec3(0.02, 0.06, 0.11) * crest * night * uGlow * 0.40;
+  // —— 月路（C3）：明月在水面的镜面光路 + 月照涌动 ——
+  // 旧版用太阳方向算夜高光，夜里太阳在地平线下故恒≈0（“夜里没光”的另一半根因）
+  vec3 halfVM = normalize(V + normalize(uMoonDir));
+  float moonSpec = pow(max(dot(Ns, halfVM), 0.0), 220.0);
+  waterCol += vec3(0.38, 0.56, 0.70) * moonSpec * night * (0.25 + uGlow) * 1.1;
+  waterCol += vec3(0.05, 0.12, 0.18) * crest * night * (0.25 + uGlow) * 0.55;
 
   // —— 陆地 v4（六类生物群系 + 岩雪山体，第 32 轮 A）——
   // 与 CPU 端 biomeWeights() 同式；L = vLand（0 海 → 1 内陆）。
@@ -351,8 +374,21 @@ void main() {
 
   // 昼夜：夜间统一压暗（保留冷调），白天补微弱冷光
   vec3 landCol = landDay * mix(vec3(0.19, 0.20, 0.23), vec3(1.0), uDayF);
+  // —— 月夜漫反射（C3）：月光给山体塑形，背阳面留天光底不死黑（包裹漫反射）——
+  float moonDiff = clamp(dot(N, normalize(uMoonDir)) * 0.5 + 0.5, 0.0, 1.0);
+  landCol += vec3(0.30, 0.42, 0.58) * moonDiff * night * 0.35;
   landCol += (lm - 0.5) * 0.04;                        // 微弱整体斑驳
   landCol += vec3(0.012, 0.040, 0.060) * uDayF * 0.45; // 白天冷调补光
+
+  // —— 投影落位（Step C1/C2）：只作用陆地；影里留 30% 天光 + 透冷调 ——
+  // C2：①加重（0.38→0.30）；②随太阳高度渐显渐隐 —— 日出日落阴影淡入淡出。
+  // 硬门限（uSunDir.y>0.02）是昼夜交替“啪”地开关的根因，改连续 fade。
+  float shadowAmt = smoothstep(-0.01, 0.10, uSunDir.y) * step(0.005, uDayF);
+  if (vWater < 0.5 && shadowAmt > 0.002) {
+    float sh = terrainShadow(vWPos, uSunDir);
+    landCol *= mix(1.0, mix(0.30, 1.0, sh), shadowAmt);
+    landCol += vec3(0.010, 0.025, 0.045) * (1.0 - sh) * uDayF * shadowAmt; // 阴影透天光冷调
+  }
 
   vec3 col = mix(landCol, waterCol, vWater);
 
@@ -387,6 +423,16 @@ export default function WorldTerrain() {
     g.setAttribute('aCoast', new THREE.BufferAttribute(coast, 1))
     g.computeVertexNormals()
 
+    // Step C1 高度纹理：512² 烘焙（半浮点线性过滤；R16F WebGL2 可过滤，无需扩展）
+    const hg = bakeHeightGrid(512, SIZE)
+    const hdata = new Uint16Array(hg.size * hg.size)
+    for (let k = 0; k < hdata.length; k++) hdata[k] = THREE.DataUtils.toHalfFloat(hg.data[k])
+    const htex = new THREE.DataTexture(hdata, hg.size, hg.size, THREE.RedFormat, THREE.HalfFloatType)
+    htex.magFilter = THREE.LinearFilter
+    htex.minFilter = THREE.LinearFilter
+    htex.wrapS = htex.wrapT = THREE.ClampToEdgeWrapping
+    htex.needsUpdate = true
+
     const u = {
       uTime: { value: 0 },
       uWind: { value: new THREE.Vector2(0, 1) },
@@ -396,6 +442,8 @@ export default function WorldTerrain() {
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uFogColor: { value: new THREE.Color('#040911') },
       uFogDensity: { value: 0.00022 },
+      uHeightTex: { value: htex },
+      uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
     }
 
     const m = new THREE.ShaderMaterial({
@@ -419,6 +467,7 @@ export default function WorldTerrain() {
       uDayF: { value: number }
       uGlow: { value: number }
       uSunDir: { value: THREE.Vector3 }
+      uMoonDir: { value: THREE.Vector3 }
       uFogColor: { value: THREE.Color }
       uFogDensity: { value: number }
     }
@@ -431,6 +480,7 @@ export default function WorldTerrain() {
     uu.uGlow.value = dayF * 0.6 + night * nightGlow
     uu.uDayF.value = dayF
     uu.uSunDir.value.copy(skyState.sunDir)
+    uu.uMoonDir.value.copy(skyState.moonDir)
     const { fromDeg } = windAt(useSim.getState().tHours)
     const th = (fromDeg * Math.PI) / 180
     uu.uWind.value.set(Math.sin(th), Math.cos(th))
